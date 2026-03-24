@@ -15,22 +15,23 @@ Deno.serve(async (req) => {
     const { location, category, radius } = await req.json()
 
     console.log(`Geocoding location: ${location}`)
-    // 1. Geocode the location using Nominatim
-    const geocodeUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`
+    // 1. Geocode the location using Photon (permissive OSM-based geocoder)
+    const geocodeUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(location)}&limit=1`
     const geoResponse = await fetch(geocodeUrl, {
-      headers: { 'User-Agent': 'ScrapeApp/1.0' }
+      headers: { 'User-Agent': 'MapExtractPro_App/1.0' }
     })
 
     if (!geoResponse.ok) {
-        throw new Error(`Failed to geocode location: ${geoResponse.status}`)
+        const text = await geoResponse.text()
+        throw new Error(`Failed to geocode location: ${geoResponse.status} - ${text}`)
     }
 
     const geoData = await geoResponse.json()
-    if (geoData.length === 0) {
+    if (!geoData.features || geoData.features.length === 0) {
         throw new Error(`Location not found: ${location}`)
     }
 
-    const { lat, lon } = geoData[0]
+    const [lon, lat] = geoData.features[0].geometry.coordinates
     const radiusInMeters = radius * 1000
 
     // Map Category to OSM tags
@@ -84,11 +85,13 @@ Deno.serve(async (req) => {
     const overpassUrl = 'https://overpass-api.de/api/interpreter'
     const response = await fetch(overpassUrl, {
       method: 'POST',
-      body: overpassQuery
+      body: overpassQuery,
+      headers: { 'User-Agent': 'MapExtractPro_App/1.0 (contact@example.com)' }
     })
 
     if (!response.ok) {
-        throw new Error(`Overpass API failed: ${response.status}`)
+        const text = await response.text()
+        throw new Error(`Overpass API failed: ${response.status} - ${text}`)
     }
 
     const data = await response.json()
@@ -138,8 +141,9 @@ Deno.serve(async (req) => {
       },
     )
   } catch (error) {
-    console.error("Scraping error:", error)
-    return new Response(JSON.stringify({ error: error.message }), {
+    const errObj = error as Error;
+    console.error("Scraping error:", errObj);
+    return new Response(JSON.stringify({ error: errObj.message || String(error) }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 400,
     })

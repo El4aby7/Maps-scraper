@@ -11,10 +11,10 @@ function MapUpdater({ location }: { location: string }) {
 
     const geocode = async () => {
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`);
+        const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(location)}&limit=1`);
         const data = await res.json();
-        if (data && data.length > 0) {
-          const { lat, lon } = data[0];
+        if (data && data.features && data.features.length > 0) {
+          const [lon, lat] = data.features[0].geometry.coordinates;
           map.setView([parseFloat(lat), parseFloat(lon)], 13, {
             animate: true,
           });
