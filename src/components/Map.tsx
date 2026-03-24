@@ -23,9 +23,10 @@ function MapUpdater({ location, mapCenter, setMapCenter }: { location: string, m
   useEffect(() => {
     if (!location) return;
 
-    // We assume if mapCenter is set, and it matches the location (geocoded), we shouldn't re-geocode.
-    // However, if the user typed something new, mapCenter will be out of sync.
-    // So we geocode the string location.
+    // If mapCenter is already set (e.g., user clicked the map), we skip geocoding
+    // the location string to prevent the pin from jumping back to a general city center.
+    // Dashboard.tsx explicitly clears mapCenter when the user types a new location.
+    if (mapCenter) return;
 
     const geocode = async () => {
       try {
@@ -34,22 +35,6 @@ function MapUpdater({ location, mapCenter, setMapCenter }: { location: string, m
         if (data && data.features && data.features.length > 0) {
           const [lon, lat] = data.features[0].geometry.coordinates;
 
-          // Avoid flying to the coordinates if the mapCenter is already very close to the geocoded result
-          // This prevents map jumping when a user clicks a map (updating location field via reverse geocode)
-          // and then the location field triggers a forward geocode.
-          // We must update the mapCenter to ensure the backend scrape uses this geocoded location,
-          // rather than an old pin the user might have clicked previously.
-          // However, we only update setMapCenter if the new location is significantly different
-          // to avoid an infinite loop where setMapCenter causes a re-render which triggers geocode again.
-          // Check distance to see if we should jump and set a new pin
-          if (mapCenter) {
-              const distance = map.distance(mapCenter, [lat, lon]);
-              if (distance < 2000) {
-                  return; // already very close, do nothing
-              }
-          }
-
-          // The user typed a new location that is far away.
           // Move the map, and update the pin (mapCenter) to match the geocoded location.
           const newCenter: [number, number] = [parseFloat(lat), parseFloat(lon)];
           map.setView(newCenter, 13, {
