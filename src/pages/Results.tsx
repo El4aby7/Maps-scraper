@@ -3,23 +3,27 @@ import { useScraping, type ScrapedResult } from '../context/ScrapingContext';
 import Papa from 'papaparse';
 
 export default function Results() {
-  const { results, isScraping, location, category } = useScraping();
+  const { results, isScraping, location, category, dataFields } = useScraping();
   const [selectedResult, setSelectedResult] = useState<ScrapedResult | null>(null);
 
   const handleExportCSV = () => {
     if (results.length === 0) return;
 
-    const csv = Papa.unparse(results.map(r => ({
-      Name: r.name,
-      Category: r.category,
-      Rating: r.rating,
-      Reviews: r.reviews,
-      Address: r.address,
-      Phone: r.phone,
-      Website: r.website || '',
-      Verified: r.verified ? 'Yes' : 'No',
-      Status: r.status
-    })));
+    // Only export fields that the user selected in the Dashboard
+    const exportData = results.map(r => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const row: any = {};
+      if (dataFields.includes('name')) row['Name'] = r.name;
+      row['Category'] = r.category;
+      if (dataFields.includes('rating')) row['Rating'] = r.rating;
+      if (dataFields.includes('reviews')) row['Reviews'] = r.reviews;
+      if (dataFields.includes('address')) row['Address'] = r.address;
+      if (dataFields.includes('phone')) row['Phone'] = r.phone;
+      if (dataFields.includes('website')) row['Website'] = r.website || '';
+      return row;
+    });
+
+    const csv = Papa.unparse(exportData);
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
@@ -71,24 +75,23 @@ export default function Results() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-surface-container-high">
-                  <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-widest font-label">Business Name</th>
-                  <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-widest font-label">Rating</th>
-                  <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-widest font-label">Address</th>
-                  <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-widest font-label">Phone</th>
-                  <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-widest font-label">Website</th>
-                  <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-widest font-label">Status</th>
+                  {dataFields.includes('name') && <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-widest font-label">Business Name</th>}
+                  {dataFields.includes('rating') && <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-widest font-label">Rating</th>}
+                  {dataFields.includes('address') && <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-widest font-label">Address</th>}
+                  {dataFields.includes('phone') && <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-widest font-label">Phone</th>}
+                  {dataFields.includes('website') && <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-widest font-label">Website</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-variant/30">
                 {results.length === 0 && !isScraping ? (
                    <tr>
-                       <td colSpan={6} className="px-6 py-10 text-center text-on-surface-variant font-semibold">
+                       <td colSpan={5} className="px-6 py-10 text-center text-on-surface-variant font-semibold">
                            No results found yet. Start an extraction from the Dashboard.
                        </td>
                    </tr>
                 ) : isScraping && results.length === 0 ? (
                    <tr>
-                       <td colSpan={6} className="px-6 py-10 text-center text-on-surface-variant font-semibold animate-pulse">
+                       <td colSpan={5} className="px-6 py-10 text-center text-on-surface-variant font-semibold animate-pulse">
                            Extracting data...
                        </td>
                    </tr>
@@ -99,41 +102,45 @@ export default function Results() {
                             onClick={() => setSelectedResult(result)}
                             className={`${idx % 2 === 0 ? 'bg-surface-container-lowest' : ''} hover:bg-surface-container-highest transition-colors cursor-pointer group`}
                         >
-                            <td className="px-6 py-4">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-lg bg-primary-fixed flex items-center justify-center text-primary flex-shrink-0">
-                                        <span className="material-symbols-outlined">storefront</span>
-                                    </div>
-                                    <div>
-                                        <div className="font-bold text-on-surface line-clamp-1">{result.name}</div>
-                                        <div className="text-xs text-on-surface-variant">{result.category}</div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td className="px-6 py-4">
-                                <div className="flex items-center gap-1 text-on-surface font-medium">
-                                    <span className="material-symbols-outlined text-sm text-yellow-500" style={{ fontVariationSettings: "'FILL' 1" }}>star</span>
-                                    {result.rating} <span className="text-xs text-outline">({result.reviews})</span>
-                                </div>
-                            </td>
-                            <td className="px-6 py-4 text-sm text-on-surface-variant max-w-[200px] truncate">{result.address}</td>
-                            <td className="px-6 py-4 text-sm font-mono text-on-surface-variant whitespace-nowrap">{result.phone}</td>
-                            <td className="px-6 py-4">
-                                {result.website ? (
-                                    <a href={result.website.startsWith('http') ? result.website : `https://${result.website}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline text-sm font-medium truncate max-w-[150px] inline-block" onClick={e => e.stopPropagation()}>
-                                        {result.website.replace(/^https?:\/\//, '')}
-                                    </a>
-                                ) : (
-                                    <span className="text-sm text-outline italic">N/A</span>
-                                )}
-                            </td>
-                            <td className="px-6 py-4">
-                                {result.verified ? (
-                                    <span className="px-2 py-1 rounded bg-tertiary/10 text-tertiary text-[10px] font-bold uppercase">Verified</span>
-                                ) : (
-                                    <span className="px-2 py-1 rounded bg-secondary/10 text-secondary text-[10px] font-bold uppercase">{result.status}</span>
-                                )}
-                            </td>
+                            {dataFields.includes('name') && (
+                              <td className="px-6 py-4">
+                                  <div className="flex items-center gap-3">
+                                      <div className="w-10 h-10 rounded-lg bg-primary-fixed flex items-center justify-center text-primary flex-shrink-0">
+                                          <span className="material-symbols-outlined">storefront</span>
+                                      </div>
+                                      <div>
+                                          <div className="font-bold text-on-surface line-clamp-1">{result.name}</div>
+                                          <div className="text-xs text-on-surface-variant">{result.category}</div>
+                                      </div>
+                                  </div>
+                              </td>
+                            )}
+                            {dataFields.includes('rating') && (
+                              <td className="px-6 py-4">
+                                  <div className="flex items-center gap-1 text-on-surface font-medium">
+                                      <span className="material-symbols-outlined text-sm text-yellow-500" style={{ fontVariationSettings: "'FILL' 1" }}>star</span>
+                                      {result.rating}
+                                      {dataFields.includes('reviews') && <span className="text-xs text-outline">({result.reviews})</span>}
+                                  </div>
+                              </td>
+                            )}
+                            {dataFields.includes('address') && (
+                              <td className="px-6 py-4 text-sm text-on-surface-variant max-w-[200px] truncate">{result.address}</td>
+                            )}
+                            {dataFields.includes('phone') && (
+                              <td className="px-6 py-4 text-sm font-mono text-on-surface-variant whitespace-nowrap">{result.phone}</td>
+                            )}
+                            {dataFields.includes('website') && (
+                              <td className="px-6 py-4">
+                                  {result.website ? (
+                                      <a href={result.website.startsWith('http') ? result.website : `https://${result.website}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline text-sm font-medium truncate max-w-[150px] inline-block" onClick={e => e.stopPropagation()}>
+                                          {result.website.replace(/^https?:\/\//, '')}
+                                      </a>
+                                  ) : (
+                                      <span className="text-sm text-outline italic">N/A</span>
+                                  )}
+                              </td>
+                            )}
                         </tr>
                     ))
                 )}
@@ -188,9 +195,6 @@ export default function Results() {
                 )}
                 <div className="absolute bottom-0 left-0 w-full p-8 bg-gradient-to-t from-black/80 to-transparent">
                   <div className="flex items-center gap-2 mb-2">
-                    {selectedResult.verified && (
-                        <span className="bg-tertiary text-on-tertiary px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-tighter">Verified</span>
-                    )}
                     <div className="flex items-center text-yellow-400">
                       <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>star</span>
                       <span className="text-sm font-bold ml-1 text-white">{selectedResult.rating}/5</span>
@@ -200,7 +204,19 @@ export default function Results() {
                 </div>
               </div>
 
-              <div className="p-8 space-y-8">
+              <div className="px-8 py-4 bg-surface-container-low border-b border-surface-container-high flex gap-3">
+                 <a
+                   href={`https://www.google.com/maps/search/?api=1&query=${selectedResult.lat},${selectedResult.lon}`}
+                   target="_blank"
+                   rel="noopener noreferrer"
+                   className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-sm rounded-lg transition-colors border border-blue-200"
+                 >
+                    <span className="material-symbols-outlined text-sm">map</span>
+                    View on Google Maps
+                 </a>
+              </div>
+
+              <div className="p-8 space-y-8 pt-6">
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold uppercase tracking-widest text-outline">Contact Information</h3>
                   <div className="grid grid-cols-1 gap-4">

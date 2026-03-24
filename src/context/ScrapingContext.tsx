@@ -9,8 +9,8 @@ export interface ScrapedResult {
   phone: string;
   website?: string;
   category: string;
-  verified: boolean;
-  status: 'Complete' | 'Reviewing';
+  lat: number;
+  lon: number;
   image?: string;
   socialLinks?: {
     instagram?: string;
@@ -34,6 +34,10 @@ interface ScrapingContextProps {
   setRadius: (radius: number) => void;
   category: string;
   setCategory: (category: string) => void;
+  dataFields: string[];
+  setDataFields: (fields: string[]) => void;
+  mapCenter: [number, number] | null;
+  setMapCenter: (center: [number, number] | null) => void;
 }
 
 const ScrapingContext = createContext<ScrapingContextProps | undefined>(undefined);
@@ -43,7 +47,9 @@ export const ScrapingProvider = ({ children }: { children: ReactNode }) => {
   const [isScraping, setIsScraping] = useState(false);
   const [location, setLocation] = useState('');
   const [radius, setRadius] = useState(15);
-  const [category, setCategory] = useState('Restaurants & Cafes');
+  const [category, setCategory] = useState('Restaurants');
+  const [dataFields, setDataFields] = useState<string[]>(['name', 'phone', 'address', 'website']);
+  const [mapCenter, setMapCenter] = useState<[number, number] | null>(null);
 
   return (
     <ScrapingContext.Provider
@@ -57,7 +63,11 @@ export const ScrapingProvider = ({ children }: { children: ReactNode }) => {
         radius,
         setRadius,
         category,
-        setCategory
+        setCategory,
+        dataFields,
+        setDataFields,
+        mapCenter,
+        setMapCenter
       }}
     >
       {children}

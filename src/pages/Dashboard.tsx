@@ -9,7 +9,9 @@ export default function Dashboard() {
     radius, setRadius,
     category, setCategory,
     setIsScraping,
-    setResults
+    setResults,
+    dataFields, setDataFields,
+    mapCenter
   } = useScraping();
 
   const navigate = useNavigate();
@@ -26,7 +28,7 @@ export default function Dashboard() {
 
     try {
       const { data, error } = await supabase.functions.invoke('scrape', {
-        body: { location, category, radius }
+        body: { location, category, radius, mapCenter }
       });
 
       if (error) {
@@ -57,8 +59,52 @@ export default function Dashboard() {
   const handleResetFilters = () => {
     setLocation('');
     setRadius(15);
-    setCategory('Restaurants & Cafes');
+    setCategory('Restaurants');
+    setDataFields(['name', 'phone', 'address', 'website']);
   };
+
+  const toggleDataField = (field: string) => {
+    if (dataFields.includes(field)) {
+      setDataFields(dataFields.filter(f => f !== field));
+    } else {
+      setDataFields([...dataFields, field]);
+    }
+  };
+
+  const availableCategories = [
+    'Accountants', 'Advertising Agencies', 'Air Conditioning Contractors', 'Airlines', 'Airports',
+    'Amusement Parks', 'Animal Hospitals', 'Antiques', 'Apartments', 'Appliance Repair',
+    'Architects', 'Art Galleries', 'Attorneys', 'Auto Body Shops', 'Auto Dealers',
+    'Auto Parts', 'Auto Repair', 'Bakeries', 'Banks', 'Barbers',
+    'Bars', 'Beauty Salons', 'Bicycles', 'Bookstores', 'Bowling Alleys',
+    'Buses', 'Butchers', 'Cafes', 'Campgrounds', 'Car Rental',
+    'Car Washes', 'Carpenters', 'Carpet Cleaning', 'Caterers', 'Cemeteries',
+    'Child Care', 'Chiropractors', 'Churches', 'Cleaners', 'Clinics',
+    'Clothing', 'Coffee Shops', 'Colleges', 'Computer Repair', 'Contractors',
+    'Convenience Stores', 'Cosmetics', 'Credit Unions', 'Day Spas', 'Delis',
+    'Dentists', 'Department Stores', 'Dermatologists', 'Desserts', 'Doctors',
+    'Dog Walkers', 'Dry Cleaners', 'Electricians', 'Electronics', 'Employment Agencies',
+    'Engineers', 'Entertainers', 'Event Planners', 'Fast Food', 'Financial Planners',
+    'Fire Stations', 'Fitness Centers', 'Florists', 'Funeral Homes', 'Furniture',
+    'Gas Stations', 'Gift Shops', 'Golf Courses', 'Groceries', 'Gyms',
+    'Hair Salons', 'Hardware Stores', 'Health Food', 'Heating Contractors', 'Hospitals',
+    'Hotels', 'Ice Cream', 'Insurance', 'Interior Designers', 'Internet Service Providers',
+    'Investment Services', 'Jewelry', 'Landscaping', 'Laundromats', 'Lawyers',
+    'Libraries', 'Liquor Stores', 'Locksmiths', 'Lumber', 'Massage',
+    'Medical Centers', 'Mexican Restaurants', 'Mortgages', 'Motels', 'Movie Theaters',
+    'Moving Companies', 'Museums', 'Nail Salons', 'Night Clubs', 'Nurseries',
+    'Optometrists', 'Orthodontists', 'Painters', 'Parks', 'Pest Control',
+    'Pet Stores', 'Pharmacies', 'Photographers', 'Physical Therapists', 'Physicians',
+    'Pizza', 'Plumbers', 'Police Stations', 'Post Offices', 'Printers',
+    'Property Management', 'Psychologists', 'Pubs', 'Real Estate', 'Restaurants',
+    'Roofers', 'Schools', 'Security', 'Shoe Stores', 'Shopping Centers',
+    'Signs', 'Spas', 'Sporting Goods', 'Storage', 'Supermarkets',
+    'Sushi', 'Tailors', 'Tattoos', 'Tax Preparation', 'Taxis',
+    'Theaters', 'Tires', 'Towing', 'Travel Agencies', 'Tree Service',
+    'Universities', 'Urgent Care', 'Used Cars', 'Vegetarian Restaurants', 'Veterinarians',
+    'Video Games', 'Vitamins', 'Warehouses', 'Waste Management', 'Web Design',
+    'Wedding Planning', 'Wholesalers', 'Wineries', 'Women\'s Clothing', 'Yoga'
+  ].sort();
 
   return (
     <div className="flex h-full w-full overflow-hidden">
@@ -108,37 +154,42 @@ export default function Dashboard() {
             <div className="space-y-3">
               <label className="block text-xs font-semibold text-on-surface-variant">Business Category</label>
               <div className="relative">
-                <select
+                <input
+                  type="text"
+                  list="categories"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  className="w-full appearance-none px-4 py-3 bg-surface-container-lowest border-none rounded-lg shadow-sm text-sm font-body focus:ring-2 focus:ring-primary/20"
-                >
-                  <option>Restaurants & Cafes</option>
-                  <option>Medical Services</option>
-                  <option>Retail Stores</option>
-                  <option>Automotive</option>
-                  <option>Coffee Shops</option>
-                  <option>Hotels</option>
-                  <option>Gyms</option>
-                </select>
-                <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-outline pointer-events-none" data-icon="expand_more">expand_more</span>
+                  className="w-full px-4 py-3 bg-surface-container-lowest border-none rounded-lg shadow-sm text-sm font-body focus:ring-2 focus:ring-primary/20"
+                  placeholder="E.g., Restaurants"
+                />
+                <datalist id="categories">
+                  {availableCategories.map(cat => (
+                    <option key={cat} value={cat} />
+                  ))}
+                </datalist>
+                <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-outline pointer-events-none" data-icon="search">search</span>
               </div>
             </div>
 
             <div className="space-y-3">
               <label className="block text-xs font-semibold text-on-surface-variant">Data Fields</label>
               <div className="flex flex-wrap gap-2">
-                <button className="px-3 py-1.5 bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 rounded-lg shadow-sm text-xs font-semibold flex items-center gap-1 border border-primary/10">
-                  <span className="material-symbols-outlined text-[14px]" data-icon="check" style={{ fontVariationSettings: "'FILL' 1" }}>check</span> Name
-                </button>
-                <button className="px-3 py-1.5 bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 rounded-lg shadow-sm text-xs font-semibold flex items-center gap-1 border border-primary/10">
-                  <span className="material-symbols-outlined text-[14px]" data-icon="check" style={{ fontVariationSettings: "'FILL' 1" }}>check</span> Phone
-                </button>
-                <button className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded-lg text-xs font-medium">Rating</button>
-                <button className="px-3 py-1.5 bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 rounded-lg shadow-sm text-xs font-semibold flex items-center gap-1 border border-primary/10">
-                  <span className="material-symbols-outlined text-[14px]" data-icon="check" style={{ fontVariationSettings: "'FILL' 1" }}>check</span> Address
-                </button>
-                <button className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded-lg text-xs font-medium">Reviews</button>
+                {['name', 'phone', 'rating', 'address', 'reviews', 'website'].map((field) => (
+                    <button
+                        key={field}
+                        onClick={() => toggleDataField(field)}
+                        className={`px-3 py-1.5 rounded-lg shadow-sm text-xs font-semibold flex items-center gap-1 border transition-colors ${
+                            dataFields.includes(field)
+                                ? "bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 border-primary/10"
+                                : "bg-slate-100 dark:bg-slate-800 text-slate-500 border-transparent"
+                        }`}
+                    >
+                      {dataFields.includes(field) && (
+                        <span className="material-symbols-outlined text-[14px]" data-icon="check" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
+                      )}
+                      {field.charAt(0).toUpperCase() + field.slice(1)}
+                    </button>
+                ))}
               </div>
             </div>
           </div>
@@ -146,13 +197,6 @@ export default function Dashboard() {
           {/* 3. Settings */}
           <div className="space-y-4">
             <label className="block text-[0.75rem] font-bold uppercase tracking-wider text-outline">Settings</label>
-
-            <div className="flex items-center justify-between p-3 bg-surface-container-low rounded-lg">
-              <span className="text-xs font-semibold text-on-surface-variant">Include only verified</span>
-              <button className="w-10 h-5 bg-tertiary/20 rounded-full relative transition-colors">
-                <div className="absolute right-1 top-1 w-3 h-3 bg-tertiary rounded-full shadow-sm"></div>
-              </button>
-            </div>
 
             <div className="space-y-3">
               <label className="block text-xs font-semibold text-on-surface-variant">Max results limit</label>
