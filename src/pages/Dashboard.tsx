@@ -1,6 +1,7 @@
 import { useScraping } from '../context/ScrapingContext';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import Map from '../components/Map';
 
 export default function Dashboard() {
   const {
@@ -181,19 +182,8 @@ export default function Dashboard() {
       <section className="flex-1 flex flex-col h-full bg-surface-container-low overflow-hidden">
         {/* Map Container */}
         <div className="h-[40%] min-h-[300px] w-full relative group">
-          <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuCzNJoKXClmOCFfEBTPhHo7SVPLTDepfz7WFny03i4iXdihjZXyP8lsjcyz5gVUb98ucTmiACr0t_EonBHWEBma2gGIHmsrYAHSY7L59UU8JE0qBmviEaUFRdlKCHXFVNacbtHXoQv6268-YHecrz0fKGq6zgUp45mlSQPGoz_USlEKrUZ1pPOD9iYPnlYY9pdzcsALYATrGeCrm3N5Lx6OhWoATOBAVN_J1tsxdTRRD_3IYB-stgMIaIE-2hdvwd-3THXZQX_ENE0" alt="Map View" className="w-full h-full object-cover grayscale-[0.2] contrast-[1.1]" />
-
-          <div className="absolute inset-0 bg-primary/5 pointer-events-none"></div>
-
-          {/* Map Controls */}
-          <div className="absolute bottom-4 right-4 flex flex-col gap-2">
-            <button className="w-10 h-10 bg-white rounded-lg shadow-lg flex items-center justify-center text-slate-700 hover:bg-slate-50">
-              <span className="material-symbols-outlined">add</span>
-            </button>
-            <button className="w-10 h-10 bg-white rounded-lg shadow-lg flex items-center justify-center text-slate-700 hover:bg-slate-50">
-              <span className="material-symbols-outlined">remove</span>
-            </button>
-          </div>
+          <Map />
+          <div className="absolute inset-0 bg-primary/5 pointer-events-none z-20"></div>
         </div>
 
         {/* Results Section */}
