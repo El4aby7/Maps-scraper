@@ -65,6 +65,7 @@ export const ScrapingProvider = ({ children }: { children: ReactNode }) => {
   );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useScraping = () => {
   const context = useContext(ScrapingContext);
   if (context === undefined) {
