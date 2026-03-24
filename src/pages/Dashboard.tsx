@@ -7,11 +7,12 @@ export default function Dashboard() {
   const {
     location, setLocation,
     radius, setRadius,
+    limit, setLimit,
     category, setCategory,
     setIsScraping,
     setResults,
     dataFields, setDataFields,
-    mapCenter
+    mapCenter, setMapCenter
   } = useScraping();
 
   const navigate = useNavigate();
@@ -28,7 +29,7 @@ export default function Dashboard() {
 
     try {
       const { data, error } = await supabase.functions.invoke('scrape', {
-        body: { location, category, radius, mapCenter }
+        body: { location, category, radius, limit, mapCenter }
       });
 
       if (error) {
@@ -125,7 +126,10 @@ export default function Dashboard() {
               <input
                 type="text"
                 value={location}
-                onChange={(e) => setLocation(e.target.value)}
+                onChange={(e) => {
+                  setLocation(e.target.value);
+                  setMapCenter(null); // Clear map center so map geocodes new text input
+                }}
                 className="w-full pl-10 pr-4 py-3 bg-surface-container-lowest border-none rounded-lg shadow-sm focus:ring-2 focus:ring-primary/20 text-sm font-body"
                 placeholder="Enter city or area"
               />
@@ -138,10 +142,11 @@ export default function Dashboard() {
               </div>
               <input
                 type="range"
-                min="1"
-                max="100"
+                min="0.1"
+                max="20"
+                step="0.1"
                 value={radius}
-                onChange={(e) => setRadius(parseInt(e.target.value))}
+                onChange={(e) => setRadius(parseFloat(e.target.value))}
                 className="w-full h-1.5 bg-surface-variant rounded-lg appearance-none cursor-pointer accent-primary"
               />
             </div>
@@ -200,7 +205,12 @@ export default function Dashboard() {
 
             <div className="space-y-3">
               <label className="block text-xs font-semibold text-on-surface-variant">Max results limit</label>
-              <input type="number" defaultValue="500" className="w-full px-4 py-3 bg-surface-container-lowest border-none rounded-lg shadow-sm text-sm font-mono focus:ring-2 focus:ring-primary/20" />
+              <input
+                type="number"
+                value={limit}
+                onChange={(e) => setLimit(parseInt(e.target.value))}
+                className="w-full px-4 py-3 bg-surface-container-lowest border-none rounded-lg shadow-sm text-sm font-mono focus:ring-2 focus:ring-primary/20"
+              />
             </div>
           </div>
 

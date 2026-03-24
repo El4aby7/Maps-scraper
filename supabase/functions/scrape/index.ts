@@ -12,7 +12,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { location, category, radius, mapCenter } = await req.json()
+    const { location, category, radius, limit, mapCenter } = await req.json()
 
     let lat, lon;
 
@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
       lat = coords[1];
     }
 
-    const radiusInMeters = radius * 1000
+    const radiusInMeters = Math.floor(radius * 1000)
 
     // Map Category to OSM tags
     let osmTag = 'amenity'
@@ -181,8 +181,11 @@ Deno.serve(async (req) => {
          });
     }
 
-    // Limit to 500 results as a safety net
-    const results = elements.slice(0, 500)
+    // Use requested limit, fallback to 500 if invalid or absent
+    const maxResults = typeof limit === 'number' && limit > 0 ? limit : 500;
+
+    // Limit results as requested
+    const results = elements.slice(0, maxResults)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .filter((el: any) => el.tags && el.tags.name) // Require at least a name
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

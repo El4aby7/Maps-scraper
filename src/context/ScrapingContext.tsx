@@ -32,6 +32,8 @@ interface ScrapingContextProps {
   setLocation: (location: string) => void;
   radius: number;
   setRadius: (radius: number) => void;
+  limit: number;
+  setLimit: (limit: number) => void;
   category: string;
   setCategory: (category: string) => void;
   dataFields: string[];
@@ -47,6 +49,7 @@ export const ScrapingProvider = ({ children }: { children: ReactNode }) => {
   const [isScraping, setIsScraping] = useState(false);
   const [location, setLocation] = useState('');
   const [radius, setRadius] = useState(15);
+  const [limit, setLimit] = useState(500);
   const [category, setCategory] = useState('Restaurants');
   const [dataFields, setDataFields] = useState<string[]>(['name', 'phone', 'address', 'website']);
   const [mapCenter, setMapCenter] = useState<[number, number] | null>(null);
@@ -62,6 +65,8 @@ export const ScrapingProvider = ({ children }: { children: ReactNode }) => {
         setLocation,
         radius,
         setRadius,
+        limit,
+        setLimit,
         category,
         setCategory,
         dataFields,
