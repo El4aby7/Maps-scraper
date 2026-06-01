@@ -354,6 +354,11 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+# Public scraping function — no user auth, so skip gateway JWT verification.
+# Keeps the new sb_publishable_ anon key from being rejected with 401.
+[functions.scrape]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.
