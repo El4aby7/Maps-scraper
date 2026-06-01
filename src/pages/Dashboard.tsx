@@ -22,7 +22,9 @@ export default function Dashboard() {
     setIsScraping,
     setResults,
     dataFields, setDataFields,
-    mapCenter, setMapCenter
+    mapCenter, setMapCenter,
+    selectionMode, setSelectionMode,
+    selectedBbox, setSelectedBbox
   } = useScraping();
 
   const navigate = useNavigate();
@@ -40,8 +42,13 @@ export default function Dashboard() {
   useEffect(() => { fetchSessions(); }, []);
 
   const handleStartScraping = async () => {
+    if (selectionMode && !selectedBbox) {
+      alert('Please click and drag on the map to select the custom area first.');
+      return;
+    }
+
     if (!location.trim()) {
-      alert('Please enter a location');
+      alert('Please enter a location or draw a custom area on the map');
       return;
     }
 
@@ -51,7 +58,15 @@ export default function Dashboard() {
 
     try {
       const { data, error } = await supabase.functions.invoke('scrape', {
-        body: { location, category, radius, limit, mapCenter }
+        body: { 
+          location, 
+          category, 
+          radius, 
+          limit, 
+          mapCenter, 
+          requiredFields: dataFields,
+          bbox: selectionMode ? selectedBbox : null
+        }
       });
 
       if (error) {
@@ -108,8 +123,10 @@ export default function Dashboard() {
   const handleResetFilters = () => {
     setLocation('');
     setRadius(15);
-    setCategory('Restaurants');
+    setCategory('All Categories');
     setDataFields(['name', 'phone', 'address', 'website']);
+    setSelectionMode(false);
+    setSelectedBbox(null);
   };
 
   const toggleDataField = (field: string) => {
@@ -121,39 +138,42 @@ export default function Dashboard() {
   };
 
   const availableCategories = [
-    'Accountants', 'Advertising Agencies', 'Air Conditioning Contractors', 'Airlines', 'Airports',
-    'Amusement Parks', 'Animal Hospitals', 'Antiques', 'Apartments', 'Appliance Repair',
-    'Architects', 'Art Galleries', 'Attorneys', 'Auto Body Shops', 'Auto Dealers',
-    'Auto Parts', 'Auto Repair', 'Bakeries', 'Banks', 'Barbers',
-    'Bars', 'Beauty Salons', 'Bicycles', 'Bookstores', 'Bowling Alleys',
-    'Buses', 'Butchers', 'Cafes', 'Campgrounds', 'Car Rental',
-    'Car Washes', 'Carpenters', 'Carpet Cleaning', 'Caterers', 'Cemeteries',
-    'Child Care', 'Chiropractors', 'Churches', 'Cleaners', 'Clinics',
-    'Clothing', 'Coffee Shops', 'Colleges', 'Computer Repair', 'Contractors',
-    'Convenience Stores', 'Cosmetics', 'Credit Unions', 'Day Spas', 'Delis',
-    'Dentists', 'Department Stores', 'Dermatologists', 'Desserts', 'Doctors',
-    'Dog Walkers', 'Dry Cleaners', 'Electricians', 'Electronics', 'Employment Agencies',
-    'Engineers', 'Entertainers', 'Event Planners', 'Fast Food', 'Financial Planners',
-    'Fire Stations', 'Fitness Centers', 'Florists', 'Funeral Homes', 'Furniture',
-    'Gas Stations', 'Gift Shops', 'Golf Courses', 'Groceries', 'Gyms',
-    'Hair Salons', 'Hardware Stores', 'Health Food', 'Heating Contractors', 'Hospitals',
-    'Hotels', 'Ice Cream', 'Insurance', 'Interior Designers', 'Internet Service Providers',
-    'Investment Services', 'Jewelry', 'Landscaping', 'Laundromats', 'Lawyers',
-    'Libraries', 'Liquor Stores', 'Locksmiths', 'Lumber', 'Massage',
-    'Medical Centers', 'Mexican Restaurants', 'Mortgages', 'Motels', 'Movie Theaters',
-    'Moving Companies', 'Museums', 'Nail Salons', 'Night Clubs', 'Nurseries',
-    'Optometrists', 'Orthodontists', 'Painters', 'Parks', 'Pest Control',
-    'Pet Stores', 'Pharmacies', 'Photographers', 'Physical Therapists', 'Physicians',
-    'Pizza', 'Plumbers', 'Police Stations', 'Post Offices', 'Printers',
-    'Property Management', 'Psychologists', 'Pubs', 'Real Estate', 'Restaurants',
-    'Roofers', 'Schools', 'Security', 'Shoe Stores', 'Shopping Centers',
-    'Signs', 'Spas', 'Sporting Goods', 'Storage', 'Supermarkets',
-    'Sushi', 'Tailors', 'Tattoos', 'Tax Preparation', 'Taxis',
-    'Theaters', 'Tires', 'Towing', 'Travel Agencies', 'Tree Service',
-    'Universities', 'Urgent Care', 'Used Cars', 'Vegetarian Restaurants', 'Veterinarians',
-    'Video Games', 'Vitamins', 'Warehouses', 'Waste Management', 'Web Design',
-    'Wedding Planning', 'Wholesalers', 'Wineries', "Women's Clothing", 'Yoga'
-  ].sort();
+    'All Categories',
+    ...[
+      'Accountants', 'Advertising Agencies', 'Air Conditioning Contractors', 'Airlines', 'Airports',
+      'Amusement Parks', 'Animal Hospitals', 'Antiques', 'Apartments', 'Appliance Repair',
+      'Architects', 'Art Galleries', 'Attorneys', 'Auto Body Shops', 'Auto Dealers',
+      'Auto Parts', 'Auto Repair', 'Bakeries', 'Banks', 'Barbers',
+      'Bars', 'Beauty Salons', 'Bicycles', 'Bookstores', 'Bowling Alleys',
+      'Buses', 'Butchers', 'Cafes', 'Campgrounds', 'Car Rental',
+      'Car Washes', 'Carpenters', 'Carpet Cleaning', 'Caterers', 'Cemeteries',
+      'Child Care', 'Chiropractors', 'Churches', 'Cleaners', 'Clinics',
+      'Clothing', 'Coffee Shops', 'Colleges', 'Computer Repair', 'Contractors',
+      'Convenience Stores', 'Cosmetics', 'Credit Unions', 'Day Spas', 'Delis',
+      'Dentists', 'Department Stores', 'Dermatologists', 'Desserts', 'Doctors',
+      'Dog Walkers', 'Dry Cleaners', 'Electricians', 'Electronics', 'Employment Agencies',
+      'Engineers', 'Entertainers', 'Event Planners', 'Fast Food', 'Financial Planners',
+      'Fire Stations', 'Fitness Centers', 'Florists', 'Funeral Homes', 'Furniture',
+      'Gas Stations', 'Gift Shops', 'Golf Courses', 'Groceries', 'Gyms',
+      'Hair Salons', 'Hardware Stores', 'Health Food', 'Heating Contractors', 'Hospitals',
+      'Hotels', 'Ice Cream', 'Insurance', 'Interior Designers', 'Internet Service Providers',
+      'Investment Services', 'Jewelry', 'Landscaping', 'Laundromats', 'Lawyers',
+      'Libraries', 'Liquor Stores', 'Locksmiths', 'Lumber', 'Massage',
+      'Medical Centers', 'Mexican Restaurants', 'Mortgages', 'Motels', 'Movie Theaters',
+      'Moving Companies', 'Museums', 'Nail Salons', 'Night Clubs', 'Nurseries',
+      'Optometrists', 'Orthodontists', 'Painters', 'Parks', 'Pest Control',
+      'Pet Stores', 'Pharmacies', 'Photographers', 'Physical Therapists', 'Physicians',
+      'Pizza', 'Plumbers', 'Police Stations', 'Post Offices', 'Printers',
+      'Property Management', 'Psychologists', 'Pubs', 'Real Estate', 'Restaurants',
+      'Roofers', 'Schools', 'Security', 'Shoe Stores', 'Shopping Centers',
+      'Signs', 'Spas', 'Sporting Goods', 'Storage', 'Supermarkets',
+      'Sushi', 'Tailors', 'Tattoos', 'Tax Preparation', 'Taxis',
+      'Theaters', 'Tires', 'Towing', 'Travel Agencies', 'Tree Service',
+      'Universities', 'Urgent Care', 'Used Cars', 'Vegetarian Restaurants', 'Veterinarians',
+      'Video Games', 'Vitamins', 'Warehouses', 'Waste Management', 'Web Design',
+      'Wedding Planning', 'Wholesalers', 'Wineries', "Women's Clothing", 'Yoga'
+    ].sort()
+  ];
 
   const formatDate = (iso: string) => {
     const d = new Date(iso);
@@ -177,38 +197,89 @@ export default function Dashboard() {
             <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Extraction Parameters</p>
           </div>
 
-          {/* 1. Location Input */}
+          {/* 1. Location Input & Selection */}
           <div className="space-y-4">
-            <label className="block text-[0.75rem] font-bold uppercase tracking-wider text-outline">Location Input</label>
-            <div className="relative">
-              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-lg" data-icon="location_on">location_on</span>
-              <input
-                type="text"
-                value={location}
-                onChange={(e) => {
-                  setLocation(e.target.value);
-                  setMapCenter(null);
+            <label className="block text-[0.75rem] font-bold uppercase tracking-wider text-outline">Location & Selection</label>
+            
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const newMode = !selectionMode;
+                  setSelectionMode(newMode);
+                  if (newMode) {
+                    setMapCenter(null);
+                  } else {
+                    setSelectedBbox(null);
+                  }
                 }}
-                className="w-full pl-10 pr-4 py-3 bg-surface-container-lowest border-none rounded-lg shadow-sm focus:ring-2 focus:ring-primary/20 text-sm font-body"
-                placeholder="Enter city or area"
-              />
+                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-bold transition-all border shadow-sm ${
+                  selectionMode
+                    ? 'bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900/30'
+                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-outline-variant/30 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[16px]">crop_free</span>
+                {selectionMode ? 'Interactive Map Mode' : 'Draw Custom Area'}
+              </button>
+
+              {selectedBbox && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedBbox(null);
+                    setLocation('');
+                  }}
+                  className="px-3 py-2.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 shadow-sm"
+                >
+                  Clear Area
+                </button>
+              )}
             </div>
 
-            <div className="space-y-3 pt-2">
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-semibold text-on-surface-variant">Radius (km)</span>
-                <span className="text-xs font-bold text-primary">{radius} km</span>
+            {selectionMode ? (
+              <div className="p-3 bg-red-50/50 dark:bg-red-950/10 border border-red-100 dark:border-red-950/20 rounded-lg text-xs text-red-600 dark:text-red-400 space-y-1">
+                <p className="font-bold flex items-center gap-1">
+                  <span className="material-symbols-outlined text-sm">gesture</span> Click & Drag Map Selection
+                </p>
+                <p className="opacity-90 leading-relaxed">
+                  Hold down click and drag from point to point on the map to define your selection rectangle. Map movement is locked while drawing.
+                </p>
               </div>
-              <input
-                type="range"
-                min="0.1"
-                max="20"
-                step="0.1"
-                value={radius}
-                onChange={(e) => setRadius(parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-surface-variant rounded-lg appearance-none cursor-pointer accent-primary"
-              />
-            </div>
+            ) : (
+              <div className="relative">
+                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-lg" data-icon="location_on">location_on</span>
+                <input
+                  type="text"
+                  value={location}
+                  onChange={(e) => {
+                    setLocation(e.target.value);
+                    setMapCenter(null);
+                    setSelectedBbox(null);
+                  }}
+                  className="w-full pl-10 pr-4 py-3 bg-surface-container-lowest border-none rounded-lg shadow-sm focus:ring-2 focus:ring-primary/20 text-sm font-body"
+                  placeholder="Enter city or area"
+                />
+              </div>
+            )}
+
+            {!selectionMode && (
+              <div className="space-y-3 pt-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-semibold text-on-surface-variant">Radius (km)</span>
+                  <span className="text-xs font-bold text-primary">{radius} km</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="20"
+                  step="0.1"
+                  value={radius}
+                  onChange={(e) => setRadius(parseFloat(e.target.value))}
+                  className="w-full h-1.5 bg-surface-variant rounded-lg appearance-none cursor-pointer accent-primary"
+                />
+              </div>
+            )}
           </div>
 
           {/* 2. Data Filters */}

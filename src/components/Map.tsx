@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { MapContainer, TileLayer, useMap, useMapEvents, Marker } from 'react-leaflet';
+import { useEffect, useState } from 'react';
+import { MapContainer, TileLayer, useMap, useMapEvents, Marker, Circle, Popup, Rectangle } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useScraping } from '../context/ScrapingContext';
 import L from 'leaflet';
@@ -55,9 +55,10 @@ function MapUpdater({ location, mapCenter, setMapCenter }: { location: string, m
 }
 
 function MapClickHandler() {
-  const { setLocation, setMapCenter } = useScraping();
+  const { setLocation, setMapCenter, selectionMode } = useScraping();
   const map = useMapEvents({
     click(e) {
+      if (selectionMode) return;
       const { lat, lng } = e.latlng;
       setMapCenter([lat, lng]);
 
@@ -93,27 +94,156 @@ function MapClickHandler() {
   return null;
 }
 
-export default function Map() {
-  const { location, mapCenter, setMapCenter } = useScraping();
+function MapSelectionHandler() {
+  const { selectionMode, selectedBbox, setSelectedBbox, setLocation } = useScraping();
+  const map = useMap();
+  const [startPoint, setStartPoint] = useState<L.LatLng | null>(null);
+  const [currentPoint, setCurrentPoint] = useState<L.LatLng | null>(null);
 
-  // Default to a central location (e.g. New York or center of US)
-  const defaultCenter: [number, number] = [39.8283, -98.5795];
+  useEffect(() => {
+    if (selectionMode) {
+      map.dragging.disable();
+    } else {
+      map.dragging.enable();
+      setStartPoint(null);
+      setCurrentPoint(null);
+    }
+  }, [selectionMode, map]);
+
+  useMapEvents({
+    mousedown(e) {
+      if (!selectionMode) return;
+      setStartPoint(e.latlng);
+      setCurrentPoint(e.latlng);
+    },
+    mousemove(e) {
+      if (!selectionMode || !startPoint) return;
+      setCurrentPoint(e.latlng);
+    },
+    mouseup(e) {
+      if (!selectionMode || !startPoint) return;
+      const endLatLng = e.latlng;
+      
+      const minLat = Math.min(startPoint.lat, endLatLng.lat);
+      const maxLat = Math.max(startPoint.lat, endLatLng.lat);
+      const minLon = Math.min(startPoint.lng, endLatLng.lng);
+      const maxLon = Math.max(startPoint.lng, endLatLng.lng);
+
+      setSelectedBbox([minLat, minLon, maxLat, maxLon]);
+      setLocation(`Selection: [${minLat.toFixed(3)}, ${minLon.toFixed(3)} - ${maxLat.toFixed(3)}, ${maxLon.toFixed(3)}]`);
+
+      setStartPoint(null);
+      setCurrentPoint(null);
+    }
+  });
+
+  if (!selectionMode) {
+    if (selectedBbox) {
+      const [minLat, minLon, maxLat, maxLon] = selectedBbox;
+      return (
+        <Rectangle
+          bounds={[[minLat, minLon], [maxLat, maxLon]]}
+          pathOptions={{
+            color: '#ef4444',
+            fillColor: '#ef4444',
+            fillOpacity: 0.15,
+            weight: 2,
+          }}
+        />
+      );
+    }
+    return null;
+  }
+
+  if (startPoint && currentPoint) {
+    const minLat = Math.min(startPoint.lat, currentPoint.lat);
+    const maxLat = Math.max(startPoint.lat, currentPoint.lat);
+    const minLon = Math.min(startPoint.lng, currentPoint.lng);
+    const maxLon = Math.max(startPoint.lng, currentPoint.lng);
+
+    return (
+      <Rectangle
+        bounds={[[minLat, minLon], [maxLat, maxLon]]}
+        pathOptions={{
+          color: '#ef4444',
+          fillColor: '#ef4444',
+          fillOpacity: 0.2,
+          weight: 2,
+          dashArray: '4 4'
+        }}
+      />
+    );
+  }
+
+  if (selectedBbox) {
+    const [minLat, minLon, maxLat, maxLon] = selectedBbox;
+    return (
+      <Rectangle
+        bounds={[[minLat, minLon], [maxLat, maxLon]]}
+        pathOptions={{
+          color: '#ef4444',
+          fillColor: '#ef4444',
+          fillOpacity: 0.15,
+          weight: 2,
+        }}
+      />
+    );
+  }
+
+  return null;
+}
+
+export default function Map() {
+  const { location, mapCenter, setMapCenter, radius, results, selectionMode, selectedBbox } = useScraping();
+
+  // Default to Cairo, Egypt
+  const defaultCenter: [number, number] = [30.0444, 31.2357];
 
   return (
     <MapContainer
       center={defaultCenter}
-      zoom={4}
+      zoom={6}
       scrollWheelZoom={true}
       style={{ width: '100%', height: '100%', zIndex: 10 }}
-      zoomControl={false} // We will use custom zoom controls if we want, or rely on Leaflet's default somewhere else, but setting to false avoids overlap with the UI if needed
+      zoomControl={false}
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      {mapCenter && <Marker position={mapCenter} />}
+      {!selectionMode && mapCenter && <Marker position={mapCenter} />}
+      {!selectionMode && !selectedBbox && mapCenter && (
+        <Circle
+          center={mapCenter}
+          radius={radius * 1000}
+          pathOptions={{
+            color: '#2563eb',
+            fillColor: '#3b82f6',
+            fillOpacity: 0.1,
+            weight: 2,
+            dashArray: '5, 5',
+          }}
+        />
+      )}
+      {results.map((r) => (
+        <Marker key={r.id} position={[r.lat, r.lon]}>
+          <Popup>
+            <div className="p-1 min-w-[150px]">
+              <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100">{r.name}</h4>
+              <p className="text-xs text-slate-500 font-medium">{r.category}</p>
+              <p className="text-xs text-slate-600 mt-1">{r.address}</p>
+              {r.phone && r.phone !== 'N/A' && (
+                <p className="text-xs font-mono text-blue-600 dark:text-blue-400 mt-1 flex items-center gap-1">
+                  <span>📞</span> {r.phone}
+                </p>
+              )}
+            </div>
+          </Popup>
+        </Marker>
+      ))}
       <MapUpdater location={location} mapCenter={mapCenter} setMapCenter={setMapCenter} />
       <MapClickHandler />
+      <MapSelectionHandler />
     </MapContainer>
   );
 }

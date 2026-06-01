@@ -153,11 +153,14 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { location, category, radius, limit, mapCenter } = await req.json()
+    const { location, category, radius, limit, mapCenter, requiredFields, bbox } = await req.json()
 
     let lat: number, lon: number
 
-    if (mapCenter && mapCenter.length === 2) {
+    if (bbox && bbox.length === 4) {
+      lat = (bbox[0] + bbox[2]) / 2
+      lon = (bbox[1] + bbox[3]) / 2
+    } else if (mapCenter && mapCenter.length === 2) {
       lat = mapCenter[0]
       lon = mapCenter[1]
     } else {
@@ -183,28 +186,55 @@ Deno.serve(async (req) => {
     const mapping = resolveOsmMapping(catLower)
 
     let overpassQuery: string
-    if (mapping) {
-      overpassQuery = `
-        [out:json][timeout:25];
-        (
-          node["${mapping.tag}"~"^(${mapping.values})$"](around:${radiusInMeters},${lat},${lon});
-          way["${mapping.tag}"~"^(${mapping.values})$"](around:${radiusInMeters},${lat},${lon});
-        );
-        out center;
-      `
+    if (bbox && bbox.length === 4) {
+      const [minLat, minLon, maxLat, maxLon] = bbox
+      if (mapping) {
+        overpassQuery = `
+          [out:json][timeout:25];
+          (
+            node["${mapping.tag}"~"^(${mapping.values})$"](${minLat},${minLon},${maxLat},${maxLon});
+            way["${mapping.tag}"~"^(${mapping.values})$"](${minLat},${minLon},${maxLat},${maxLon});
+          );
+          out center;
+        `
+      } else {
+        overpassQuery = `
+          [out:json][timeout:25];
+          (
+            node["amenity"](${minLat},${minLon},${maxLat},${maxLon});
+            way["amenity"](${minLat},${minLon},${maxLat},${maxLon});
+            node["shop"](${minLat},${minLon},${maxLat},${maxLon});
+            way["shop"](${minLat},${minLon},${maxLat},${maxLon});
+            node["office"](${minLat},${minLon},${maxLat},${maxLon});
+            way["office"](${minLat},${minLon},${maxLat},${maxLon});
+          );
+          out center;
+        `
+      }
     } else {
-      overpassQuery = `
-        [out:json][timeout:25];
-        (
-          node["amenity"](around:${radiusInMeters},${lat},${lon});
-          way["amenity"](around:${radiusInMeters},${lat},${lon});
-          node["shop"](around:${radiusInMeters},${lat},${lon});
-          way["shop"](around:${radiusInMeters},${lat},${lon});
-          node["office"](around:${radiusInMeters},${lat},${lon});
-          way["office"](around:${radiusInMeters},${lat},${lon});
-        );
-        out center;
-      `
+      if (mapping) {
+        overpassQuery = `
+          [out:json][timeout:25];
+          (
+            node["${mapping.tag}"~"^(${mapping.values})$"](around:${radiusInMeters},${lat},${lon});
+            way["${mapping.tag}"~"^(${mapping.values})$"](around:${radiusInMeters},${lat},${lon});
+          );
+          out center;
+        `
+      } else {
+        overpassQuery = `
+          [out:json][timeout:25];
+          (
+            node["amenity"](around:${radiusInMeters},${lat},${lon});
+            way["amenity"](around:${radiusInMeters},${lat},${lon});
+            node["shop"](around:${radiusInMeters},${lat},${lon});
+            way["shop"](around:${radiusInMeters},${lat},${lon});
+            node["office"](around:${radiusInMeters},${lat},${lon});
+            way["office"](around:${radiusInMeters},${lat},${lon});
+          );
+          out center;
+        `
+      }
     }
 
     const overpassUrls = [
@@ -266,7 +296,7 @@ Deno.serve(async (req) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let elements: any[] = data.elements || []
 
-    if (!mapping) {
+    if (!mapping && catLower !== 'all categories') {
       elements = elements.filter((el: { tags?: Record<string, string> }) => {
         if (!el.tags) return false
         const name = (el.tags.name || '').toLowerCase()
@@ -277,10 +307,9 @@ Deno.serve(async (req) => {
 
     const maxResults = typeof limit === 'number' && limit > 0 ? limit : 500
 
-    // Filter first so the limit applies to usable results only
-    const results = elements
+    // Filter and map elements to structured results
+    const rawResults = elements
       .filter((el: { tags?: Record<string, string> }) => el.tags?.name)
-      .slice(0, maxResults)
       .map((el: { id: number; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags: Record<string, string> }) => {
         const tags = el.tags
         const addrParts: string[] = []
@@ -289,17 +318,57 @@ Deno.serve(async (req) => {
         if (tags['addr:city']) addrParts.push(tags['addr:city'])
         const elLat = el.lat ?? el.center?.lat ?? lat
         const elLon = el.lon ?? el.center?.lon ?? lon
+        const streetAddress = addrParts.join(' ')
+        const rawPhone = tags.phone || tags['contact:phone'] || ''
+        const rawWebsite = tags.website || tags['contact:website'] || ''
         return {
           id: el.id.toString(),
           name: tags.name,
-          address: addrParts.join(' ') || `${elLat.toFixed(5)}, ${elLon.toFixed(5)}`,
-          phone: tags.phone || tags['contact:phone'] || 'N/A',
-          website: tags.website || tags['contact:website'] || undefined,
+          address: streetAddress || `${elLat.toFixed(5)}, ${elLon.toFixed(5)}`,
+          phone: rawPhone || 'N/A',
+          website: rawWebsite || undefined,
           category: tags.amenity || tags.shop || tags.office || tags.tourism || tags.leisure || category,
           lat: elLat,
           lon: elLon,
+          hasRealAddress: streetAddress.length > 0,
+          hasPhone: rawPhone.length > 0,
+          hasWebsite: rawWebsite.length > 0,
         }
       })
+      .filter((r) => {
+        if (!requiredFields || !Array.isArray(requiredFields)) return true
+        if (requiredFields.includes('name') && !r.name) return false
+        if (requiredFields.includes('phone') && !r.hasPhone) return false
+        if (requiredFields.includes('address') && !r.hasRealAddress) return false
+        if (requiredFields.includes('website') && !r.hasWebsite) return false
+        return true
+      })
+
+    // Deduplicate results by name and distance (50m radius)
+    const deduplicated: typeof rawResults = []
+    const seen: Array<{ name: string; lat: number; lon: number }> = []
+
+    for (const r of rawResults) {
+      const nameNorm = r.name.toLowerCase().trim()
+      let isDuplicate = false
+      for (const item of seen) {
+        if (item.name === nameNorm) {
+          const dLat = (r.lat - item.lat) * 111000
+          const dLon = (r.lon - item.lon) * 111000 * Math.cos((r.lat * Math.PI) / 180)
+          const dist = Math.sqrt(dLat * dLat + dLon * dLon)
+          if (dist < 50) {
+            isDuplicate = true
+            break
+          }
+        }
+      }
+      if (!isDuplicate) {
+        seen.push({ name: nameNorm, lat: r.lat, lon: r.lon })
+        deduplicated.push(r)
+      }
+    }
+
+    const results = deduplicated.slice(0, maxResults)
 
     // Save to DB (best-effort — don't fail the request if this errors)
     let sessionId: string | null = null

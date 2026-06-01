@@ -29,6 +29,10 @@ interface ScrapingContextProps {
   setDataFields: (fields: string[]) => void;
   mapCenter: [number, number] | null;
   setMapCenter: (center: [number, number] | null) => void;
+  selectionMode: boolean;
+  setSelectionMode: (mode: boolean) => void;
+  selectedBbox: [number, number, number, number] | null;
+  setSelectedBbox: (bbox: [number, number, number, number] | null) => void;
 }
 
 const ScrapingContext = createContext<ScrapingContextProps | undefined>(undefined);
@@ -39,9 +43,11 @@ export const ScrapingProvider = ({ children }: { children: ReactNode }) => {
   const [location, setLocation] = useState('');
   const [radius, setRadius] = useState(15);
   const [limit, setLimit] = useState(500);
-  const [category, setCategory] = useState('Restaurants');
+  const [category, setCategory] = useState('All Categories');
   const [dataFields, setDataFields] = useState<string[]>(['name', 'phone', 'address', 'website']);
   const [mapCenter, setMapCenter] = useState<[number, number] | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedBbox, setSelectedBbox] = useState<[number, number, number, number] | null>(null);
 
   return (
     <ScrapingContext.Provider
@@ -54,6 +60,8 @@ export const ScrapingProvider = ({ children }: { children: ReactNode }) => {
         category, setCategory,
         dataFields, setDataFields,
         mapCenter, setMapCenter,
+        selectionMode, setSelectionMode,
+        selectedBbox, setSelectedBbox,
       }}
     >
       {children}
