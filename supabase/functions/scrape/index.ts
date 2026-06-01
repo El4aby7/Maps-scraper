@@ -335,14 +335,7 @@ Deno.serve(async (req) => {
           hasWebsite: rawWebsite.length > 0,
         }
       })
-      .filter((r) => {
-        if (!requiredFields || !Array.isArray(requiredFields)) return true
-        if (requiredFields.includes('name') && !r.name) return false
-        if (requiredFields.includes('phone') && !r.hasPhone) return false
-        if (requiredFields.includes('address') && !r.hasRealAddress) return false
-        if (requiredFields.includes('website') && !r.hasWebsite) return false
-        return true
-      })
+
 
     // Deduplicate results by name and distance (50m radius)
     const deduplicated: typeof rawResults = []
