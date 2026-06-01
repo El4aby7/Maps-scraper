@@ -207,15 +207,59 @@ Deno.serve(async (req) => {
       `
     }
 
-    const overpassUrl = 'https://overpass-api.de/api/interpreter'
-    const response = await fetch(overpassUrl, {
-      method: 'POST',
-      body: overpassQuery,
-      headers: { 'User-Agent': 'MapExtractPro_App/1.0 (contact@example.com)' }
-    })
-    if (!response.ok) {
-      const text = await response.text()
-      throw new Error(`Overpass API failed: ${response.status} - ${text}`)
+    const overpassUrls = [
+      'https://overpass-api.de/api/interpreter',
+      'https://lz4.overpass-api.de/api/interpreter',
+      'https://z.overpass-api.de/api/interpreter',
+      'https://overpass.private.coffee/api/interpreter'
+    ]
+
+    let lastError: Error | null = null
+    let response: Response | null = null
+    const attemptLogs: string[] = []
+
+    for (const overpassUrl of overpassUrls) {
+      console.log(`Trying Overpass URL: ${overpassUrl}`)
+      try {
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 20000) // 20-second timeout per mirror
+        
+        const res = await fetch(overpassUrl, {
+          method: 'POST',
+          body: 'data=' + encodeURIComponent(overpassQuery),
+          headers: { 
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'Origin': 'https://overpass-turbo.eu',
+            'Referer': 'https://overpass-turbo.eu/'
+          },
+          signal: controller.signal
+        })
+        clearTimeout(timeoutId)
+        
+        if (res.ok) {
+          response = res
+          console.log(`Successfully fetched from ${overpassUrl}`)
+          break
+        } else {
+          const text = await res.text()
+          const logMsg = `Overpass URL ${overpassUrl} failed with status ${res.status}: ${text.substring(0, 100)}`
+          console.warn(logMsg)
+          attemptLogs.push(logMsg)
+          lastError = new Error(`Overpass API ${overpassUrl} failed: ${res.status} - ${text}`)
+        }
+      } catch (err) {
+        const logMsg = `Failed to connect to ${overpassUrl}: ${(err as Error).message}`
+        console.warn(logMsg)
+        attemptLogs.push(logMsg)
+        lastError = err as Error
+      }
+    }
+
+    if (!response) {
+      throw new Error(`All Overpass API mirrors failed.\nDetails:\n${attemptLogs.join('\n')}`)
     }
 
     const data = await response.json()
