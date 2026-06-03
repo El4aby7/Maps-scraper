@@ -17,23 +17,31 @@ Deno.serve(async (req) => {
     const { location, category, radius, limit, mapCenter, requiredFields, bbox } = await req.json()
 
     let minLat: number, minLon: number, maxLat: number, maxLon: number
+    let centerLat: number, centerLon: number
+    let radiusInMeters: number
 
     // Resolve location and bounding box coordinates
     if (bbox && bbox.length === 4) {
       [minLat, minLon, maxLat, maxLon] = bbox
+      centerLat = (minLat + maxLat) / 2
+      centerLon = (minLon + maxLon) / 2
+      
+      // Distance in meters between center and corner (approximate)
+      const latDiff = Math.abs(maxLat - centerLat)
+      const lonDiff = Math.abs(maxLon - centerLon)
+      const kmDiff = Math.sqrt((latDiff * 111) ** 2 + (lonDiff * (111 * Math.cos((centerLat * Math.PI) / 180))) ** 2)
+      radiusInMeters = Math.max(100, Math.floor(kmDiff * 1000))
     } else if (mapCenter && mapCenter.length === 2) {
-      const cLat = mapCenter[0]
-      const cLon = mapCenter[1]
-      const rKm = radius || 15
-
-      // Approximate bounding box of a circle (1 degree of latitude is ~111km)
-      const latOffset = rKm / 111
-      const lonOffset = rKm / (111 * Math.cos((cLat * Math.PI) / 180))
-
-      minLat = cLat - latOffset
-      maxLat = cLat + latOffset
-      minLon = cLon - lonOffset
-      maxLon = cLon + lonOffset
+      centerLat = mapCenter[0]
+      centerLon = mapCenter[1]
+      radiusInMeters = Math.max(100, Math.floor((radius || 15) * 1000))
+      
+      const latOffset = (radius || 15) / 111
+      const lonOffset = (radius || 15) / (111 * Math.cos((centerLat * Math.PI) / 180))
+      minLat = centerLat - latOffset
+      maxLat = centerLat + latOffset
+      minLon = centerLon - lonOffset
+      maxLon = centerLon + lonOffset
     } else {
       const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(location)}&key=${GOOGLE_MAPS_API_KEY}`
       const geoResponse = await fetch(geocodeUrl)
@@ -46,82 +54,106 @@ Deno.serve(async (req) => {
         throw new Error(`Location not found: ${location}`)
       }
       const loc = geoData.results[0].geometry.location
-      const cLat = loc.lat
-      const cLon = loc.lng
-      const rKm = radius || 15
+      centerLat = loc.lat
+      centerLon = loc.lng
+      radiusInMeters = Math.max(100, Math.floor((radius || 15) * 1000))
 
-      const latOffset = rKm / 111
-      const lonOffset = rKm / (111 * Math.cos((cLat * Math.PI) / 180))
-
-      minLat = cLat - latOffset
-      maxLat = cLat + latOffset
-      minLon = cLon - lonOffset
-      maxLon = cLon + lonOffset
+      const latOffset = (radius || 15) / 111
+      const lonOffset = (radius || 15) / (111 * Math.cos((centerLat * Math.PI) / 180))
+      minLat = centerLat - latOffset
+      maxLat = centerLat + latOffset
+      minLon = centerLon - lonOffset
+      maxLon = centerLon + lonOffset
     }
 
-    // Build the query text string for Text Search (New)
-    const categoryQuery = category && category.toLowerCase().trim() !== 'all categories' ? category : 'establishments'
-    let queryText = categoryQuery
-
-    // Only append location to the query if it is a real place name and we are not using coordinate restrictions
-    if (location && !location.startsWith('Selection:') && !/^\d/.test(location.trim())) {
-      if (!bbox && !mapCenter) {
-        queryText = `${categoryQuery} in ${location}`
-      }
-    }
-
-    // Fetch places (handling pagination)
+    const isAllCategories = !category || category.toLowerCase().trim() === 'all-categories' || category.toLowerCase().trim() === 'all categories'
+    
+    // Fetch places
     let allPlaces: any[] = []
-    let pageToken: string | null = null
-    let pagesFetched = 0
     const maxResults = typeof limit === 'number' && limit > 0 ? limit : 60
 
-    do {
-      const requestBody: any = {
-        textQuery: queryText,
-        locationRestriction: {
-          rectangle: {
-            low: { latitude: minLat, longitude: minLon },
-            high: { latitude: maxLat, longitude: maxLon }
-          }
-        }
-      }
-
-      if (pageToken) {
-        requestBody.pageToken = pageToken
-      }
-
-      console.log(`Fetching page ${pagesFetched + 1} of Places API (New) Text Search...`)
-      const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    if (isAllCategories) {
+      // Use Nearby Search (New) optimized for finding any type of business near center coordinate
+      console.log(`Fetching Nearby Search (New) results...`)
+      const response = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.internationalPhoneNumber,places.websiteUri,places.types,nextPageToken'
+          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.internationalPhoneNumber,places.websiteUri,places.types'
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify({
+          maxResultCount: Math.min(20, maxResults),
+          locationRestriction: {
+            circle: {
+              center: { latitude: centerLat, longitude: centerLon },
+              radius: radiusInMeters
+            }
+          }
+        })
       })
 
       if (!response.ok) {
         const errText = await response.text()
-        throw new Error(`Google Places Text Search failed: ${response.status} - ${errText}`)
+        throw new Error(`Google Places Nearby Search failed: ${response.status} - ${errText}`)
       }
 
       const data = await response.json()
       if (data.places) {
-        allPlaces = allPlaces.concat(data.places)
+        allPlaces = data.places
       }
+    } else {
+      // Use Text Search (New) for keyword specific searches
+      const queryText = category
+      let pageToken: string | null = null
+      let pagesFetched = 0
 
-      pageToken = data.nextPageToken || null
-      pagesFetched++
+      do {
+        const requestBody: any = {
+          textQuery: queryText,
+          locationRestriction: {
+            rectangle: {
+              low: { latitude: minLat, longitude: minLon },
+              high: { latitude: maxLat, longitude: maxLon }
+            }
+          }
+        }
 
-      // Wait a moment between requests to avoid rate limits
-      if (pageToken && allPlaces.length < maxResults && pagesFetched < 3) {
-        await new Promise(resolve => setTimeout(resolve, 500))
-      } else {
-        pageToken = null
-      }
-    } while (pageToken)
+        if (pageToken) {
+          requestBody.pageToken = pageToken
+        }
+
+        console.log(`Fetching page ${pagesFetched + 1} of Places API (New) Text Search...`)
+        const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
+            'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.internationalPhoneNumber,places.websiteUri,places.types,nextPageToken'
+          },
+          body: JSON.stringify(requestBody)
+        })
+
+        if (!response.ok) {
+          const errText = await response.text()
+          throw new Error(`Google Places Text Search failed: ${response.status} - ${errText}`)
+        }
+
+        const data = await response.json()
+        if (data.places) {
+          allPlaces = allPlaces.concat(data.places)
+        }
+
+        pageToken = data.nextPageToken || null
+        pagesFetched++
+
+        if (pageToken && allPlaces.length < maxResults && pagesFetched < 3) {
+          await new Promise(resolve => setTimeout(resolve, 500))
+        } else {
+          pageToken = null
+        }
+      } while (pageToken)
+    }
 
     // Map new Place objects directly to the DB schema
     const results = allPlaces.slice(0, maxResults).map((place) => {
@@ -132,8 +164,8 @@ Deno.serve(async (req) => {
         phone: place.internationalPhoneNumber || 'N/A',
         website: place.websiteUri || undefined,
         category: place.types && place.types.length > 0 ? place.types[0].replace(/_/g, ' ') : category,
-        lat: place.location?.latitude ?? minLat,
-        lon: place.location?.longitude ?? minLon,
+        lat: place.location?.latitude ?? centerLat,
+        lon: place.location?.longitude ?? centerLon,
       }
     })
 
