@@ -16,23 +16,24 @@ Deno.serve(async (req) => {
   try {
     const { location, category, radius, limit, mapCenter, requiredFields, bbox } = await req.json()
 
-    let lat: number, lon: number
-    let radiusInMeters: number
+    let minLat: number, minLon: number, maxLat: number, maxLon: number
 
-    // Resolve location and radius
+    // Resolve location and bounding box coordinates
     if (bbox && bbox.length === 4) {
-      const [minLat, minLon, maxLat, maxLon] = bbox
-      lat = (minLat + maxLat) / 2
-      lon = (minLon + maxLon) / 2
-      
-      // Calculate radius as distance from center to max corner in meters
-      const dLat = (maxLat - lat) * 111000
-      const dLon = (maxLon - lon) * 111000 * Math.cos((lat * Math.PI) / 180)
-      radiusInMeters = Math.floor(Math.sqrt(dLat * dLat + dLon * dLon))
+      [minLat, minLon, maxLat, maxLon] = bbox
     } else if (mapCenter && mapCenter.length === 2) {
-      lat = mapCenter[0]
-      lon = mapCenter[1]
-      radiusInMeters = Math.floor(radius * 1000)
+      const cLat = mapCenter[0]
+      const cLon = mapCenter[1]
+      const rKm = radius || 15
+
+      // Approximate bounding box of a circle (1 degree of latitude is ~111km)
+      const latOffset = rKm / 111
+      const lonOffset = rKm / (111 * Math.cos((cLat * Math.PI) / 180))
+
+      minLat = cLat - latOffset
+      maxLat = cLat + latOffset
+      minLon = cLon - lonOffset
+      maxLon = cLon + lonOffset
     } else {
       const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(location)}&key=${GOOGLE_MAPS_API_KEY}`
       const geoResponse = await fetch(geocodeUrl)
@@ -45,102 +46,89 @@ Deno.serve(async (req) => {
         throw new Error(`Location not found: ${location}`)
       }
       const loc = geoData.results[0].geometry.location
-      lat = loc.lat
-      lon = loc.lng
-      radiusInMeters = Math.floor(radius * 1000)
+      const cLat = loc.lat
+      const cLon = loc.lng
+      const rKm = radius || 15
+
+      const latOffset = rKm / 111
+      const lonOffset = rKm / (111 * Math.cos((cLat * Math.PI) / 180))
+
+      minLat = cLat - latOffset
+      maxLat = cLat + latOffset
+      minLon = cLon - lonOffset
+      maxLon = cLon + lonOffset
     }
 
-    // Build Places Nearby Search URL
-    let searchUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=${radiusInMeters}&key=${GOOGLE_MAPS_API_KEY}`
-    const catLower = (category as string).toLowerCase().trim()
-    if (category && catLower !== 'all categories') {
-      searchUrl += `&keyword=${encodeURIComponent(category)}`
-    } else {
-      searchUrl += `&type=establishment`
-    }
+    // Build the query text string for Text Search (New)
+    const categoryQuery = category && category.toLowerCase().trim() !== 'all categories' ? category : 'establishments'
+    const queryText = `${categoryQuery} in ${location}`
 
-    // Fetch places (handling next page token pagination)
+    // Fetch places (handling pagination)
     let allPlaces: any[] = []
-    let currentUrl = searchUrl
+    let pageToken: string | null = null
     let pagesFetched = 0
-    const maxResults = typeof limit === 'number' && limit > 0 ? limit : 500
+    const maxResults = typeof limit === 'number' && limit > 0 ? limit : 60
 
-    while (currentUrl && allPlaces.length < maxResults && pagesFetched < 3) {
-      console.log(`Fetching from Google Places (page ${pagesFetched + 1})...`)
-      const res = await fetch(currentUrl)
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(`Google Places search failed: ${res.status} - ${text}`)
-      }
-
-      const data = await res.json()
-      if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-        throw new Error(`Google Places API returned status: ${data.status}. Message: ${data.error_message || 'None'}`)
-      }
-
-      if (data.results) {
-        allPlaces = allPlaces.concat(data.results)
-      }
-
-      pagesFetched++
-      if (data.next_page_token && allPlaces.length < maxResults && pagesFetched < 3) {
-        // The token requires a short delay before it becomes valid/active
-        await new Promise(resolve => setTimeout(resolve, 2000))
-        currentUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?pagetoken=${data.next_page_token}&key=${GOOGLE_MAPS_API_KEY}`
-      } else {
-        currentUrl = ''
-      }
-    }
-
-    const placesToFetch = allPlaces.slice(0, maxResults)
-    console.log(`Found ${placesToFetch.length} total places. Fetching details...`)
-
-    // Fetch rich details (phone and website) for each place in parallel batches
-    const batchSize = 10
-    const results: any[] = []
-
-    for (let i = 0; i < placesToFetch.length; i += batchSize) {
-      const batch = placesToFetch.slice(i, i + batchSize)
-      const batchPromises = batch.map(async (place) => {
-        try {
-          const detailUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.place_id}&fields=name,formatted_address,international_phone_number,website,geometry,types&key=${GOOGLE_MAPS_API_KEY}`
-          const detailRes = await fetch(detailUrl)
-          if (detailRes.ok) {
-            const detailData = await detailRes.json()
-            if (detailData.status === 'OK' && detailData.result) {
-              const r = detailData.result
-              return {
-                id: place.place_id,
-                name: r.name || place.name,
-                address: r.formatted_address || place.vicinity || `${r.geometry?.location?.lat.toFixed(5)}, ${r.geometry?.location?.lng.toFixed(5)}`,
-                phone: r.international_phone_number || 'N/A',
-                website: r.website || undefined,
-                category: r.types && r.types.length > 0 ? r.types[0].replace(/_/g, ' ') : category,
-                lat: r.geometry?.location?.lat ?? place.geometry?.location?.lat ?? lat,
-                lon: r.geometry?.location?.lng ?? place.geometry?.location?.lng ?? lon,
-              }
-            }
+    do {
+      const requestBody: any = {
+        textQuery: queryText,
+        locationRestriction: {
+          rectangle: {
+            low: { latitude: minLat, longitude: minLon },
+            high: { latitude: maxLat, longitude: maxLon }
           }
-        } catch (err) {
-          console.error(`Failed to fetch details for place ${place.place_id}:`, err)
         }
+      }
 
-        // Fallback basic mapping if detail fetch fails
-        return {
-          id: place.place_id,
-          name: place.name,
-          address: place.vicinity || `${place.geometry?.location?.lat.toFixed(5)}, ${place.geometry?.location?.lng.toFixed(5)}`,
-          phone: 'N/A',
-          website: undefined,
-          category: place.types && place.types.length > 0 ? place.types[0].replace(/_/g, ' ') : category,
-          lat: place.geometry?.location?.lat ?? lat,
-          lon: place.geometry?.location?.lng ?? lon,
-        }
+      if (pageToken) {
+        requestBody.pageToken = pageToken
+      }
+
+      console.log(`Fetching page ${pagesFetched + 1} of Places API (New) Text Search...`)
+      const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
+          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.internationalPhoneNumber,places.websiteUri,places.types,nextPageToken'
+        },
+        body: JSON.stringify(requestBody)
       })
 
-      const batchResults = await Promise.all(batchPromises)
-      results.push(...batchResults)
-    }
+      if (!response.ok) {
+        const errText = await response.text()
+        throw new Error(`Google Places Text Search failed: ${response.status} - ${errText}`)
+      }
+
+      const data = await response.json()
+      if (data.places) {
+        allPlaces = allPlaces.concat(data.places)
+      }
+
+      pageToken = data.nextPageToken || null
+      pagesFetched++
+
+      // Wait a moment between requests to avoid rate limits
+      if (pageToken && allPlaces.length < maxResults && pagesFetched < 3) {
+        await new Promise(resolve => setTimeout(resolve, 500))
+      } else {
+        pageToken = null
+      }
+    } while (pageToken)
+
+    // Map new Place objects directly to the DB schema
+    const results = allPlaces.slice(0, maxResults).map((place) => {
+      return {
+        id: place.id,
+        name: place.displayName?.text || 'Unknown Business',
+        address: place.formattedAddress || 'No Address Provided',
+        phone: place.internationalPhoneNumber || 'N/A',
+        website: place.websiteUri || undefined,
+        category: place.types && place.types.length > 0 ? place.types[0].replace(/_/g, ' ') : category,
+        lat: place.location?.latitude ?? minLat,
+        lon: place.location?.longitude ?? minLon,
+      }
+    })
 
     // Save to DB (best-effort)
     let sessionId: string | null = null
