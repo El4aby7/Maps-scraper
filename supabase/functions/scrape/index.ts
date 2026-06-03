@@ -61,7 +61,14 @@ Deno.serve(async (req) => {
 
     // Build the query text string for Text Search (New)
     const categoryQuery = category && category.toLowerCase().trim() !== 'all categories' ? category : 'establishments'
-    const queryText = `${categoryQuery} in ${location}`
+    let queryText = categoryQuery
+
+    // Only append location to the query if it is a real place name and we are not using coordinate restrictions
+    if (location && !location.startsWith('Selection:') && !/^\d/.test(location.trim())) {
+      if (!bbox && !mapCenter) {
+        queryText = `${categoryQuery} in ${location}`
+      }
+    }
 
     // Fetch places (handling pagination)
     let allPlaces: any[] = []
