@@ -1,45 +1,106 @@
-import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, useMap, useMapEvents, Marker, Circle, Popup, Rectangle } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
+import { useEffect, useRef, useState } from 'react';
+import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
 import { useScraping } from '../context/ScrapingContext';
-import L from 'leaflet';
 
-// Fix Leaflet's default icon path issues in React
-import iconUrl from 'leaflet/dist/images/marker-icon.png';
-import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
-import shadowUrl from 'leaflet/dist/images/marker-shadow.png';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl,
-  iconUrl,
-  shadowUrl,
+setOptions({
+  key: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCFbleJw-jWugYH5fJV5Q6EfICKnLCAgEI',
+  v: 'weekly',
 });
 
-function MapUpdater({ location, mapCenter, setMapCenter }: { location: string, mapCenter: [number, number] | null, setMapCenter: (center: [number, number] | null) => void }) {
-  const map = useMap();
+export default function Map() {
+  const {
+    location,
+    setLocation,
+    mapCenter,
+    setMapCenter,
+    radius,
+    results,
+    selectionMode,
+    selectedBbox,
+    setSelectedBbox
+  } = useScraping();
 
+  const mapRef = useRef<HTMLDivElement>(null);
+  const [googleLoaded, setGoogleLoaded] = useState(false);
+  const [mapInstance, setMapInstance] = useState<google.maps.Map | null>(null);
+
+  // Refs for overlays to manage their lifecycle
+  const centerMarkerRef = useRef<google.maps.Marker | null>(null);
+  const radiusCircleRef = useRef<google.maps.Circle | null>(null);
+  const resultsMarkersRef = useRef<google.maps.Marker[]>([]);
+  const selectionRectangleRef = useRef<google.maps.Rectangle | null>(null);
+  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+
+  // Drag selection tracking refs
+  const isDrawingRef = useRef(false);
+  const startLatLngRef = useRef<google.maps.LatLng | null>(null);
+
+  // Load Google Maps libraries
   useEffect(() => {
-    if (!location) return;
+    Promise.all([
+      importLibrary('maps'),
+      importLibrary('marker'),
+    ])
+      .then(() => {
+        setGoogleLoaded(true);
+      })
+      .catch((err) => {
+        console.error('Error loading Google Maps libraries:', err);
+      });
+  }, []);
 
-    // If mapCenter is already set (e.g., user clicked the map), we skip geocoding
-    // the location string to prevent the pin from jumping back to a general city center.
-    // Dashboard.tsx explicitly clears mapCenter when the user types a new location.
+  // Initialize Map
+  useEffect(() => {
+    if (!googleLoaded || !mapRef.current) return;
+
+    const defaultCenter = { lat: 30.0444, lng: 31.2357 }; // Cairo
+    const initialCenter = mapCenter ? { lat: mapCenter[0], lng: mapCenter[1] } : defaultCenter;
+
+    const map = new google.maps.Map(mapRef.current!, {
+      center: initialCenter,
+      zoom: mapCenter ? 13 : 6,
+      disableDefaultUI: true,
+      zoomControl: false,
+    });
+
+    setMapInstance(map);
+  }, [googleLoaded]);
+
+  // Sync selectionMode options (disable dragging/gestures when drawing)
+  useEffect(() => {
+    if (!mapInstance) return;
+
+    if (selectionMode) {
+      mapInstance.setOptions({
+        draggable: false,
+        gestureHandling: 'none',
+      });
+    } else {
+      mapInstance.setOptions({
+        draggable: true,
+        gestureHandling: 'cooperative',
+      });
+    }
+  }, [mapInstance, selectionMode]);
+
+  // Forward Geocode typed location
+  useEffect(() => {
+    if (!location || !mapInstance) return;
+    // Skip geocoding if the center was already manually set (e.g. click/drag)
     if (mapCenter) return;
 
     const geocode = async () => {
       try {
-        const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(location)}&limit=1`);
+        const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCFbleJw-jWugYH5fJV5Q6EfICKnLCAgEI';
+        const res = await fetch(
+          `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(location)}&key=${apiKey}`
+        );
         const data = await res.json();
-        if (data && data.features && data.features.length > 0) {
-          const [lon, lat] = data.features[0].geometry.coordinates;
-
-          // Move the map, and update the pin (mapCenter) to match the geocoded location.
-          const newCenter: [number, number] = [parseFloat(lat), parseFloat(lon)];
-          map.setView(newCenter, 13, {
-            animate: true,
-          });
+        if (data.results && data.results.length > 0) {
+          const loc = data.results[0].geometry.location;
+          const newCenter: [number, number] = [loc.lat, loc.lng];
+          mapInstance.setCenter(loc);
+          mapInstance.setZoom(13);
           setMapCenter(newCenter);
         }
       } catch (err) {
@@ -47,203 +108,212 @@ function MapUpdater({ location, mapCenter, setMapCenter }: { location: string, m
       }
     };
 
-    const timeoutId = setTimeout(geocode, 1000); // Debounce geocoding
+    const timeoutId = setTimeout(geocode, 1000); // Debounce
     return () => clearTimeout(timeoutId);
-  }, [location, map, mapCenter, setMapCenter]);
+  }, [location, mapInstance, mapCenter, setMapCenter]);
 
-  return null;
-}
+  // Handle map interaction (click to pin / reverse geocode AND custom draw area)
+  useEffect(() => {
+    if (!mapInstance) return;
 
-function MapClickHandler() {
-  const { setLocation, setMapCenter, selectionMode } = useScraping();
-  const map = useMapEvents({
-    click(e) {
-      if (selectionMode) return;
-      const { lat, lng } = e.latlng;
+    // 1. Regular click (only active when NOT in selectionMode)
+    const clickListener = mapInstance.addListener('click', (e: google.maps.MapMouseEvent) => {
+      if (selectionMode || !e.latLng) return;
+
+      const lat = e.latLng.lat();
+      const lng = e.latLng.lng();
       setMapCenter([lat, lng]);
 
-      // Reverse geocode to get a readable location string
-      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`)
+      const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCFbleJw-jWugYH5fJV5Q6EfICKnLCAgEI';
+      fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`)
         .then(res => res.json())
         .then(data => {
-            if (data && data.address) {
-                // Try to build a readable city/area name
-                const area = data.address.city || data.address.town || data.address.village || data.address.suburb || data.address.county || "";
-                const state = data.address.state || "";
-                if (area) {
-                    setLocation(`${area}${state ? `, ${state}` : ''}`);
-                } else if (data.display_name) {
-                    // Fallback to a shortened display name
-                    const parts = data.display_name.split(',');
-                    setLocation(parts.slice(0, 3).join(',').trim());
-                } else {
-                    setLocation(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-                }
-            } else {
-                setLocation(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-            }
+          if (data.results && data.results.length > 0) {
+            const formatted = data.results[0].formatted_address;
+            const parts = formatted.split(',');
+            setLocation(parts.slice(0, 3).join(',').trim());
+          } else {
+            setLocation(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+          }
         })
         .catch(err => {
-            console.error("Reverse geocoding failed", err);
-            setLocation(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+          console.error('Reverse geocoding failed:', err);
+          setLocation(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
         });
 
-      map.flyTo(e.latlng, map.getZoom());
-    },
-  });
-  return null;
-}
+      mapInstance.panTo(e.latLng);
+    });
 
-function MapSelectionHandler() {
-  const { selectionMode, selectedBbox, setSelectedBbox, setLocation } = useScraping();
-  const map = useMap();
-  const [startPoint, setStartPoint] = useState<L.LatLng | null>(null);
-  const [currentPoint, setCurrentPoint] = useState<L.LatLng | null>(null);
+    // 2. Custom area selection (mousedown/mousemove/mouseup)
+    const mousedownListener = mapInstance.addListener('mousedown', (e: google.maps.MapMouseEvent) => {
+      if (!selectionMode || !e.latLng) return;
 
+      isDrawingRef.current = true;
+      startLatLngRef.current = e.latLng;
+
+      if (selectionRectangleRef.current) {
+        selectionRectangleRef.current.setMap(null);
+      }
+
+      selectionRectangleRef.current = new google.maps.Rectangle({
+        map: mapInstance,
+        strokeColor: '#ef4444',
+        strokeOpacity: 0.8,
+        strokeWeight: 2,
+        fillColor: '#ef4444',
+        fillOpacity: 0.2,
+        bounds: new google.maps.LatLngBounds(e.latLng, e.latLng),
+      });
+    });
+
+    const mousemoveListener = mapInstance.addListener('mousemove', (e: google.maps.MapMouseEvent) => {
+      if (!isDrawingRef.current || !selectionRectangleRef.current || !startLatLngRef.current || !e.latLng) return;
+
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend(startLatLngRef.current);
+      bounds.extend(e.latLng);
+      selectionRectangleRef.current.setBounds(bounds);
+    });
+
+    const mouseupListener = mapInstance.addListener('mouseup', (e: google.maps.MapMouseEvent) => {
+      if (!isDrawingRef.current || !selectionRectangleRef.current || !startLatLngRef.current || !e.latLng) return;
+
+      isDrawingRef.current = false;
+      const bounds = selectionRectangleRef.current.getBounds();
+      if (bounds) {
+        const ne = bounds.getNorthEast();
+        const sw = bounds.getSouthWest();
+        const minLat = sw.lat();
+        const minLon = sw.lng();
+        const maxLat = ne.lat();
+        const maxLon = ne.lng();
+        
+        setSelectedBbox([minLat, minLon, maxLat, maxLon]);
+        setLocation(`Selection: [${minLat.toFixed(3)}, ${minLon.toFixed(3)} - ${maxLat.toFixed(3)}, ${maxLon.toFixed(3)}]`);
+      }
+    });
+
+    return () => {
+      google.maps.event.removeListener(clickListener);
+      google.maps.event.removeListener(mousedownListener);
+      google.maps.event.removeListener(mousemoveListener);
+      google.maps.event.removeListener(mouseupListener);
+    };
+  }, [mapInstance, selectionMode, setLocation, setMapCenter, setSelectedBbox]);
+
+  // Sync Center Marker and Radius Circle
   useEffect(() => {
-    if (selectionMode) {
-      map.dragging.disable();
-    } else {
-      map.dragging.enable();
-      setStartPoint(null);
-      setCurrentPoint(null);
+    if (!mapInstance) return;
+
+    if (centerMarkerRef.current) {
+      centerMarkerRef.current.setMap(null);
+      centerMarkerRef.current = null;
     }
-  }, [selectionMode, map]);
-
-  useMapEvents({
-    mousedown(e) {
-      if (!selectionMode) return;
-      setStartPoint(e.latlng);
-      setCurrentPoint(e.latlng);
-    },
-    mousemove(e) {
-      if (!selectionMode || !startPoint) return;
-      setCurrentPoint(e.latlng);
-    },
-    mouseup(e) {
-      if (!selectionMode || !startPoint) return;
-      const endLatLng = e.latlng;
-      
-      const minLat = Math.min(startPoint.lat, endLatLng.lat);
-      const maxLat = Math.max(startPoint.lat, endLatLng.lat);
-      const minLon = Math.min(startPoint.lng, endLatLng.lng);
-      const maxLon = Math.max(startPoint.lng, endLatLng.lng);
-
-      setSelectedBbox([minLat, minLon, maxLat, maxLon]);
-      setLocation(`Selection: [${minLat.toFixed(3)}, ${minLon.toFixed(3)} - ${maxLat.toFixed(3)}, ${maxLon.toFixed(3)}]`);
-
-      setStartPoint(null);
-      setCurrentPoint(null);
+    if (radiusCircleRef.current) {
+      radiusCircleRef.current.setMap(null);
+      radiusCircleRef.current = null;
     }
-  });
 
-  if (!selectionMode) {
-    if (selectedBbox) {
+    if (!selectedBbox && mapCenter) {
+      const centerLatLng = { lat: mapCenter[0], lng: mapCenter[1] };
+
+      centerMarkerRef.current = new google.maps.Marker({
+        map: mapInstance,
+        position: centerLatLng,
+      });
+
+      radiusCircleRef.current = new google.maps.Circle({
+        map: mapInstance,
+        center: centerLatLng,
+        radius: radius * 1000,
+        strokeColor: '#2563eb',
+        strokeOpacity: 0.8,
+        strokeWeight: 2,
+        fillColor: '#3b82f6',
+        fillOpacity: 0.10,
+      });
+    }
+  }, [mapInstance, mapCenter, radius, selectedBbox]);
+
+  // Sync Selection Rectangle Overlay (when drawing completes or bbox is cleared)
+  useEffect(() => {
+    if (!mapInstance) return;
+
+    // Reset selection rectangle if bbox is cleared and we're not drawing
+    if (!selectedBbox && !isDrawingRef.current && selectionRectangleRef.current) {
+      selectionRectangleRef.current.setMap(null);
+      selectionRectangleRef.current = null;
+    }
+
+    // Restore selected rectangle if state contains a static bbox (e.g. loading or completed drawing)
+    if (selectedBbox && !isDrawingRef.current) {
+      if (selectionRectangleRef.current) {
+        selectionRectangleRef.current.setMap(null);
+      }
+
       const [minLat, minLon, maxLat, maxLon] = selectedBbox;
-      return (
-        <Rectangle
-          bounds={[[minLat, minLon], [maxLat, maxLon]]}
-          pathOptions={{
-            color: '#ef4444',
-            fillColor: '#ef4444',
-            fillOpacity: 0.15,
-            weight: 2,
-          }}
-        />
-      );
+      selectionRectangleRef.current = new google.maps.Rectangle({
+        map: mapInstance,
+        strokeColor: '#ef4444',
+        strokeOpacity: 0.8,
+        strokeWeight: 2,
+        fillColor: '#ef4444',
+        fillOpacity: 0.15,
+        bounds: {
+          north: maxLat,
+          south: minLat,
+          east: maxLon,
+          west: minLon,
+        },
+      });
     }
-    return null;
-  }
+  }, [mapInstance, selectedBbox]);
 
-  if (startPoint && currentPoint) {
-    const minLat = Math.min(startPoint.lat, currentPoint.lat);
-    const maxLat = Math.max(startPoint.lat, currentPoint.lat);
-    const minLon = Math.min(startPoint.lng, currentPoint.lng);
-    const maxLon = Math.max(startPoint.lng, currentPoint.lng);
+  // Sync Search Results Markers
+  useEffect(() => {
+    if (!mapInstance) return;
 
-    return (
-      <Rectangle
-        bounds={[[minLat, minLon], [maxLat, maxLon]]}
-        pathOptions={{
-          color: '#ef4444',
-          fillColor: '#ef4444',
-          fillOpacity: 0.2,
-          weight: 2,
-          dashArray: '4 4'
-        }}
-      />
-    );
-  }
+    // Clear old result markers
+    resultsMarkersRef.current.forEach(m => m.setMap(null));
+    resultsMarkersRef.current = [];
 
-  if (selectedBbox) {
-    const [minLat, minLon, maxLat, maxLon] = selectedBbox;
-    return (
-      <Rectangle
-        bounds={[[minLat, minLon], [maxLat, maxLon]]}
-        pathOptions={{
-          color: '#ef4444',
-          fillColor: '#ef4444',
-          fillOpacity: 0.15,
-          weight: 2,
-        }}
-      />
-    );
-  }
+    if (!infoWindowRef.current) {
+      infoWindowRef.current = new google.maps.InfoWindow();
+    }
 
-  return null;
-}
+    results.forEach(r => {
+      const marker = new google.maps.Marker({
+        map: mapInstance,
+        position: { lat: r.lat, lng: r.lon },
+        title: r.name,
+      });
 
-export default function Map() {
-  const { location, mapCenter, setMapCenter, radius, results, selectionMode, selectedBbox } = useScraping();
+      marker.addListener('click', () => {
+        const contentString = `
+          <div style="padding: 4px; min-width: 150px; font-family: sans-serif;">
+            <h4 style="margin: 0 0 4px 0; font-size: 14px; font-weight: bold; color: #0f172a;">${r.name}</h4>
+            <p style="margin: 0 0 4px 0; font-size: 12px; color: #64748b; font-weight: 500;">${r.category}</p>
+            <p style="margin: 4px 0 0 0; font-size: 12px; color: #334155;">${r.address}</p>
+            ${r.phone && r.phone !== 'N/A' ? `
+              <p style="margin: 4px 0 0 0; font-size: 12px; font-family: monospace; color: #2563eb;">
+                <span>📞</span> ${r.phone}
+              </p>
+            ` : ''}
+          </div>
+        `;
+        infoWindowRef.current!.setContent(contentString);
+        infoWindowRef.current!.open(mapInstance, marker);
+      });
 
-  // Default to Cairo, Egypt
-  const defaultCenter: [number, number] = [30.0444, 31.2357];
+      resultsMarkersRef.current.push(marker);
+    });
+  }, [mapInstance, results]);
 
   return (
-    <MapContainer
-      center={defaultCenter}
-      zoom={6}
-      scrollWheelZoom={true}
-      style={{ width: '100%', height: '100%', zIndex: 10 }}
-      zoomControl={false}
-    >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-      {!selectionMode && mapCenter && <Marker position={mapCenter} />}
-      {!selectionMode && !selectedBbox && mapCenter && (
-        <Circle
-          center={mapCenter}
-          radius={radius * 1000}
-          pathOptions={{
-            color: '#2563eb',
-            fillColor: '#3b82f6',
-            fillOpacity: 0.1,
-            weight: 2,
-            dashArray: '5, 5',
-          }}
-        />
-      )}
-      {results.map((r) => (
-        <Marker key={r.id} position={[r.lat, r.lon]}>
-          <Popup>
-            <div className="p-1 min-w-[150px]">
-              <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100">{r.name}</h4>
-              <p className="text-xs text-slate-500 font-medium">{r.category}</p>
-              <p className="text-xs text-slate-600 mt-1">{r.address}</p>
-              {r.phone && r.phone !== 'N/A' && (
-                <p className="text-xs font-mono text-blue-600 dark:text-blue-400 mt-1 flex items-center gap-1">
-                  <span>📞</span> {r.phone}
-                </p>
-              )}
-            </div>
-          </Popup>
-        </Marker>
-      ))}
-      <MapUpdater location={location} mapCenter={mapCenter} setMapCenter={setMapCenter} />
-      <MapClickHandler />
-      <MapSelectionHandler />
-    </MapContainer>
+    <div
+      ref={mapRef}
+      className="w-full h-full"
+      style={{ minHeight: '300px' }}
+    />
   );
 }
