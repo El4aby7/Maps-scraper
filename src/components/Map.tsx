@@ -3,7 +3,7 @@ import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
 import { useScraping } from '../context/ScrapingContext';
 
 setOptions({
-  key: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCFbleJw-jWugYH5fJV5Q6EfICKnLCAgEI',
+  key: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
   v: 'weekly',
 });
 
@@ -91,7 +91,7 @@ export default function Map() {
 
     const geocode = async () => {
       try {
-        const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCFbleJw-jWugYH5fJV5Q6EfICKnLCAgEI';
+        const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
         const res = await fetch(
           `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(location)}&key=${apiKey}`
         );
@@ -124,7 +124,7 @@ export default function Map() {
       const lng = e.latLng.lng();
       setMapCenter([lat, lng]);
 
-      const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCFbleJw-jWugYH5fJV5Q6EfICKnLCAgEI';
+      const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
       fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`)
         .then(res => res.json())
         .then(data => {

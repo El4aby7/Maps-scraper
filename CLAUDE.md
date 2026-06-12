@@ -46,4 +46,6 @@ A single-page React 19 + TypeScript + Vite app ("MapExtractPro") that scrapes bu
 
 ## Security note
 
-`.env` is committed to the repo and the Google Maps / Supabase keys are also hardcoded as inline fallbacks in `Map.tsx`, the Edge Function, and `deploy.yml`. Treat these keys as public/exposed; do not add new secrets this way.
+Secrets are read only from env vars — no hardcoded fallbacks. `.env` is gitignored (see `.env.example` for the required keys); the frontend reads `VITE_*` from `import.meta.env`, GitHub Actions injects them from repo **Secrets**, and the Edge Function reads `GOOGLE_MAPS_API_KEY` from **Supabase function secrets**. If any of these are unset, the build/function will fail loudly rather than fall back to a baked-in key.
+
+NOTE: the keys previously committed here (two Google API keys + the Supabase anon key) were exposed in public git history and must be rotated in Google Cloud Console / Supabase. Restrict the browser Maps key by HTTP referrer + API; keep the server Places key out of client code.
