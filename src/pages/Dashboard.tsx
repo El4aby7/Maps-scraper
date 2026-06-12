@@ -74,8 +74,20 @@ export default function Dashboard() {
       });
 
       if (error) {
-        console.error('Supabase Edge Function Error:', error);
-        alert('Failed to extract data. See console for details.');
+        // supabase-js wraps a non-2xx in a generic FunctionsHttpError; the real
+        // reason is in the response body the Edge Function returned ({ error }).
+        let detail = error.message;
+        const ctx = (error as { context?: Response }).context;
+        if (ctx && typeof ctx.json === 'function') {
+          try {
+            const body = await ctx.json();
+            if (body?.error) detail = body.error;
+          } catch {
+            // body wasn't JSON — fall back to the generic message
+          }
+        }
+        console.error('Supabase Edge Function Error:', detail, error);
+        alert(`Failed to extract data: ${detail}`);
         setIsScraping(false);
         return;
       }

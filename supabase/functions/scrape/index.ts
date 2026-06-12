@@ -94,6 +94,13 @@ Deno.serve(async (req) => {
         throw new Error(`Failed to geocode location: ${geoResponse.status} - ${text}`)
       }
       const geoData = await geoResponse.json()
+      // Geocoding returns HTTP 200 even on auth failures; the real outcome is in `status`.
+      // REQUEST_DENIED here usually means the key lacks the Geocoding API or is referrer-restricted.
+      if (geoData.status && geoData.status !== 'OK') {
+        throw new Error(
+          `Geocoding failed (${geoData.status}): ${geoData.error_message || `could not resolve "${location}"`}`
+        )
+      }
       if (!geoData.results || geoData.results.length === 0) {
         throw new Error(`Location not found: ${location}`)
       }
