@@ -41,6 +41,10 @@ export default function Dashboard() {
 
   useEffect(() => { fetchSessions(); }, []);
 
+  // Google Places (New) caps results: 60 per Text Search, 20 per Nearby Search ("All Categories")
+  const isAllCategories = category.toLowerCase().trim().replace('-', ' ') === 'all categories';
+  const maxLimit = isAllCategories ? 20 : 60;
+
   const handleStartScraping = async () => {
     if (selectionMode && !selectedBbox) {
       alert('Please click and drag on the map to select the custom area first.');
@@ -59,10 +63,10 @@ export default function Dashboard() {
     try {
       const { data, error } = await supabase.functions.invoke('scrape', {
         body: { 
-          location, 
-          category, 
-          radius, 
-          limit, 
+          location,
+          category,
+          radius,
+          limit: Math.min(limit, maxLimit),
           mapCenter, 
           requiredFields: dataFields,
           bbox: selectionMode ? selectedBbox : null
@@ -77,7 +81,25 @@ export default function Dashboard() {
       }
 
       if (data?.results && Array.isArray(data.results)) {
-        setResults(data.results);
+        let resultsToShow = data.results;
+        // Place IDs are stable, so leads found in a previous session can be flagged (best-effort)
+        try {
+          const ids = resultsToShow.map((r: { id: string }) => r.id);
+          if (ids.length > 0) {
+            let seenQuery = supabase.from('scraped_results').select('id').in('id', ids);
+            if (data.session_id) seenQuery = seenQuery.neq('session_id', data.session_id);
+            const { data: seen } = await seenQuery;
+            if (seen && seen.length > 0) {
+              const seenIds = new Set(seen.map((row: { id: string }) => row.id));
+              resultsToShow = resultsToShow.map((r: { id: string }) =>
+                seenIds.has(r.id) ? { ...r, seenBefore: true } : r
+              );
+            }
+          }
+        } catch (seenErr) {
+          console.error('Seen-before check failed (non-fatal):', seenErr);
+        }
+        setResults(resultsToShow);
       } else {
         console.error('Invalid data received:', data);
         alert('Received invalid data format.');
@@ -111,6 +133,12 @@ export default function Dashboard() {
         address: (r.address as string) || '',
         phone: (r.phone as string) || 'N/A',
         website: (r.website as string) || undefined,
+        socials: (r.socials as Record<string, string>) || undefined,
+        googleMapsUri: (r.google_maps_uri as string) || undefined,
+        rating: (r.rating as number) ?? undefined,
+        userRatingCount: (r.user_rating_count as number) ?? undefined,
+        openingHours: (r.opening_hours as string) || undefined,
+        businessStatus: (r.business_status as string) || undefined,
         lat: r.lat as number,
         lon: r.lon as number,
       })));
@@ -123,6 +151,7 @@ export default function Dashboard() {
   const handleResetFilters = () => {
     setLocation('');
     setRadius(15);
+    setLimit(60);
     setCategory('All Categories');
     setDataFields(['name', 'phone', 'address', 'website']);
     setSelectionMode(false);
@@ -336,10 +365,15 @@ export default function Dashboard() {
               <label className="block text-xs font-semibold text-on-surface-variant">Max results limit</label>
               <input
                 type="number"
-                value={limit}
-                onChange={(e) => setLimit(parseInt(e.target.value))}
+                min={1}
+                max={maxLimit}
+                value={Math.min(limit, maxLimit)}
+                onChange={(e) => setLimit(Math.max(1, Math.min(maxLimit, parseInt(e.target.value) || 1)))}
                 className="w-full px-4 py-3 bg-surface-container-lowest border-none rounded-lg shadow-sm text-sm font-mono focus:ring-2 focus:ring-primary/20"
               />
+              <p className="text-[11px] text-on-surface-variant leading-snug">
+                Google returns at most 60 results per search (20 for All Categories).
+              </p>
             </div>
           </div>
 

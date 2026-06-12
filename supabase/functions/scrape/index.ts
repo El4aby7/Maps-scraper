@@ -8,6 +8,50 @@ const corsHeaders = {
 
 const GOOGLE_MAPS_API_KEY = Deno.env.get('GOOGLE_MAPS_API_KEY') || 'AIzaSyCi27W3gsYHMXHT050oUPc-hiwEfke4Xsk';
 
+const PLACE_FIELDS = [
+  'places.id',
+  'places.displayName',
+  'places.formattedAddress',
+  'places.location',
+  'places.internationalPhoneNumber',
+  'places.websiteUri',
+  'places.types',
+  'places.googleMapsUri',
+  'places.rating',
+  'places.userRatingCount',
+  'places.regularOpeningHours.weekdayDescriptions',
+  'places.businessStatus',
+].join(',')
+
+// Businesses often list a social profile as their "website" in Google.
+// Classify the URL so socials are surfaced separately from real websites.
+const SOCIAL_PLATFORMS: { key: string; pattern: RegExp }[] = [
+  { key: 'facebook', pattern: /(?:^|\.)(?:facebook\.com|fb\.com|fb\.me)$/i },
+  { key: 'instagram', pattern: /(?:^|\.)instagram\.com$/i },
+  { key: 'tiktok', pattern: /(?:^|\.)tiktok\.com$/i },
+  { key: 'x', pattern: /(?:^|\.)(?:twitter\.com|x\.com)$/i },
+  { key: 'linkedin', pattern: /(?:^|\.)linkedin\.com$/i },
+  { key: 'youtube', pattern: /(?:^|\.)(?:youtube\.com|youtu\.be)$/i },
+  { key: 'whatsapp', pattern: /(?:^|\.)(?:wa\.me|whatsapp\.com)$/i },
+]
+
+function classifyWebsite(url?: string): { website?: string; socials: Record<string, string> } {
+  const socials: Record<string, string> = {}
+  if (!url) return { website: undefined, socials }
+  try {
+    const hostname = new URL(url).hostname
+    for (const { key, pattern } of SOCIAL_PLATFORMS) {
+      if (pattern.test(hostname)) {
+        socials[key] = url
+        return { website: undefined, socials }
+      }
+    }
+  } catch {
+    // Not a parseable URL — keep it as a plain website string
+  }
+  return { website: url, socials }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -80,7 +124,7 @@ Deno.serve(async (req) => {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.internationalPhoneNumber,places.websiteUri,places.types'
+          'X-Goog-FieldMask': PLACE_FIELDS
         },
         body: JSON.stringify({
           maxResultCount: Math.min(20, maxResults),
@@ -129,7 +173,7 @@ Deno.serve(async (req) => {
           headers: {
             'Content-Type': 'application/json',
             'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
-            'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.internationalPhoneNumber,places.websiteUri,places.types,nextPageToken'
+            'X-Goog-FieldMask': `${PLACE_FIELDS},nextPageToken`
           },
           body: JSON.stringify(requestBody)
         })
@@ -157,12 +201,21 @@ Deno.serve(async (req) => {
 
     // Map new Place objects directly to the DB schema
     const results = allPlaces.slice(0, maxResults).map((place) => {
+      const name = place.displayName?.text || 'Unknown Business'
+      const { website, socials } = classifyWebsite(place.websiteUri)
       return {
         id: place.id,
-        name: place.displayName?.text || 'Unknown Business',
+        name,
         address: place.formattedAddress || 'No Address Provided',
         phone: place.internationalPhoneNumber || 'N/A',
-        website: place.websiteUri || undefined,
+        website,
+        socials,
+        googleMapsUri: place.googleMapsUri ||
+          `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}&query_place_id=${place.id}`,
+        rating: place.rating ?? undefined,
+        userRatingCount: place.userRatingCount ?? undefined,
+        openingHours: place.regularOpeningHours?.weekdayDescriptions?.join('\n') || undefined,
+        businessStatus: place.businessStatus || undefined,
         category: place.types && place.types.length > 0 ? place.types[0].replace(/_/g, ' ') : category,
         lat: place.location?.latitude ?? centerLat,
         lon: place.location?.longitude ?? centerLon,
@@ -194,6 +247,12 @@ Deno.serve(async (req) => {
               address: r.address,
               phone: r.phone,
               website: r.website ?? null,
+              socials: Object.keys(r.socials).length > 0 ? r.socials : null,
+              google_maps_uri: r.googleMapsUri ?? null,
+              rating: r.rating ?? null,
+              user_rating_count: r.userRatingCount ?? null,
+              opening_hours: r.openingHours ?? null,
+              business_status: r.businessStatus ?? null,
               lat: r.lat,
               lon: r.lon,
             }))
